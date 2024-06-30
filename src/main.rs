@@ -10,12 +10,15 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let mut commands = String::new();
-                stream.read_to_string(&mut commands).unwrap();
+                let mut buf = [0; 512];
+                loop {
+                    let bytes_read = stream.read(&mut buf).unwrap();
+                    if bytes_read == 0 {
+                        break;
+                    }
 
-                commands.split("\n").into_iter().for_each(|_c| {
-                    stream.write(b"+PONG\r\n").unwrap();
-                });
+                    stream.write_all(b"+PONG\r\n").unwrap();
+                }
             }
             Err(e) => {
                 println!("error: {}", e);

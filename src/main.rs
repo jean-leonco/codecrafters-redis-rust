@@ -151,7 +151,7 @@ impl Command {
                         }
                         "set" => {
                             let key = elements.get(1).expect("SET message should have key");
-                            let value = elements.get(1).expect("SET message should have value");
+                            let value = elements.get(2).expect("SET message should have value");
 
                             Ok(Command::Set {
                                 key: match key {

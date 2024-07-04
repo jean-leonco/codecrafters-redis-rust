@@ -1,6 +1,8 @@
 use std::{
+    collections::HashMap,
     fmt,
     io::{BufRead, Cursor, Read},
+    sync::Arc,
 };
 
 use anyhow::{Context, Ok};
@@ -8,12 +10,15 @@ use bytes::Buf;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
+    sync::Mutex,
 };
 
 #[derive(Debug, Clone)]
 enum Message {
     Array { elements: Vec<Message> },
     BulkString { data: String },
+    SimpleString { data: String },
+    Null,
 }
 
 impl fmt::Display for Message {
@@ -21,6 +26,8 @@ impl fmt::Display for Message {
         match self {
             Message::Array { .. } => write!(f, "Array"),
             Message::BulkString { .. } => write!(f, "BulkString"),
+            Message::SimpleString { .. } => write!(f, "SimpleString"),
+            Message::Null { .. } => write!(f, "Null"),
         }
     }
 }
@@ -29,36 +36,60 @@ impl Message {
     fn from_buf(cursor: &mut Cursor<&[u8]>) -> anyhow::Result<Message> {
         let first_byte = cursor.get_u8();
 
-        let mut size_buf = Vec::new();
-        cursor
-            .read_until(b'\n', &mut size_buf)
-            .context("Failed to read message size")?;
-
-        let size: usize = std::str::from_utf8(&size_buf[..size_buf.len() - 2])
-            .context("Failed to convert message size to string")?
-            .parse::<usize>()
-            .context("Failed to convert message size to usize")?;
-
         match first_byte {
             b'*' => {
+                let mut size_buf = Vec::new();
+                cursor
+                    .read_until(b'\n', &mut size_buf)
+                    .context("Failed to read Array size")?;
+                let size: usize = std::str::from_utf8(&size_buf[..size_buf.len() - 2])
+                    .context("Failed to convert Array size to string")?
+                    .parse::<usize>()
+                    .context("Failed to convert Array size to usize")?;
                 let mut elements = Vec::with_capacity(size);
                 for i in 0..size {
                     let message = Message::from_buf(cursor)
-                        .with_context(|| format!("Failed to parse element {}", i))?;
+                        .with_context(|| format!("Failed to parse Array element {}", i))?;
                     elements.push(message);
                 }
 
                 Ok(Message::Array { elements })
             }
             b'$' => {
+                let mut size_buf = Vec::new();
+                cursor
+                    .read_until(b'\n', &mut size_buf)
+                    .context("Failed to read BulkString size")?;
+                let size: usize = std::str::from_utf8(&size_buf[..size_buf.len() - 2])
+                    .context("Failed to convert BulkString size to string")?
+                    .parse::<usize>()
+                    .context("Failed to convert BulkString size to usize")?;
                 let mut data = vec![0; size + 2];
-                Read::read_exact(cursor, &mut data).context("Failed to read Bulk String")?;
+                Read::read_exact(cursor, &mut data).context("Failed to read BulkString")?;
 
                 Ok(Message::BulkString {
                     data: std::str::from_utf8(&data[..data.len() - 2])
-                        .context("Failed to convert Bulk String to data")?
+                        .context("Failed to parse BulkString data")?
                         .to_string(),
                 })
+            }
+            b'+' => {
+                let mut data_buf: Vec<u8> = Vec::new();
+                cursor
+                    .read_until(b'\n', &mut data_buf)
+                    .context("Failed to SimpleString data")?;
+
+                Ok(Message::SimpleString {
+                    data: std::str::from_utf8(&&data_buf[..data_buf.len() - 2])
+                        .context("Failed to parse SimpleString data")?
+                        .to_string(),
+                })
+            }
+            b'_' => {
+                // advance \r\n
+                cursor.advance(2);
+
+                Ok(Message::Null)
             }
             _ => anyhow::bail!("Message type not supported {}", first_byte),
         }
@@ -79,6 +110,8 @@ impl Message {
             Message::BulkString { data } => format!("${}\r\n{}\r\n", data.len(), data)
                 .as_bytes()
                 .to_vec(),
+            Message::SimpleString { data } => format!("+{}\r\n", data).as_bytes().to_vec(),
+            Message::Null => "_\r\n".as_bytes().to_vec(),
         }
     }
 }
@@ -86,6 +119,8 @@ impl Message {
 enum Command {
     Ping,
     Echo { message: String },
+    Set { key: String, value: String },
+    Get { key: String },
 }
 
 impl Command {
@@ -108,15 +143,40 @@ impl Command {
                                 message: match message {
                                     Message::BulkString { data } => data.to_string(),
                                     _ => anyhow::bail!(
-                                        "Message type not support for ECHO {}",
+                                        "Message type not support by ECHO {}",
                                         message
                                     ),
                                 },
                             })
                         }
+                        "set" => {
+                            let key = elements.get(1).expect("SET message should have key");
+                            let value = elements.get(1).expect("SET message should have value");
+
+                            Ok(Command::Set {
+                                key: match key {
+                                    Message::BulkString { data } => data.to_string(),
+                                    _ => anyhow::bail!("Message type not support by SET {}", key),
+                                },
+                                value: match value {
+                                    Message::BulkString { data } => data.to_string(),
+                                    _ => anyhow::bail!("Message type not support by SET {}", value),
+                                },
+                            })
+                        }
+                        "get" => {
+                            let key = elements.get(1).expect("GET message should have key");
+
+                            Ok(Command::Get {
+                                key: match key {
+                                    Message::BulkString { data } => data.to_string(),
+                                    _ => anyhow::bail!("Message type not support by GET {}", key),
+                                },
+                            })
+                        }
                         _ => anyhow::bail!("Command not implemented"),
                     },
-                    _ => anyhow::bail!("Command must be a Bulk String"),
+                    _ => anyhow::bail!("Command must be a BulkString"),
                 }
             }
             _ => anyhow::bail!("Command must be a Array"),
@@ -128,12 +188,15 @@ impl Command {
 async fn main() -> anyhow::Result<()> {
     println!("Logs from your program will appear here!");
 
+    let db = Arc::new(Mutex::new(HashMap::new()));
+
     let listener = TcpListener::bind("127.0.0.1:6379")
         .await
         .context("Failed to bind port")?;
 
     loop {
         let (mut stream, _) = listener.accept().await.context("Failed to get client")?;
+        let db = db.clone();
 
         tokio::spawn(async move {
             let mut buf = [0; 1024];
@@ -154,13 +217,43 @@ async fn main() -> anyhow::Result<()> {
                         stream
                             .write_all(b"+PONG\r\n")
                             .await
-                            .context("Failed to write ping response")?;
+                            .context("Failed to write PING response")?;
                     }
                     Command::Echo { message } => {
                         stream
                             .write_all(&Message::BulkString { data: message }.serialize())
                             .await
-                            .context("Failed to write echo response")?;
+                            .context("Failed to write ECHO response")?;
+                    }
+                    Command::Set { key, value } => {
+                        let mut db = db.lock().await;
+                        db.insert(key, value);
+
+                        stream
+                            .write_all(
+                                &Message::SimpleString {
+                                    data: String::from("Ok"),
+                                }
+                                .serialize(),
+                            )
+                            .await
+                            .context("Failed to write Set response")?
+                    }
+                    Command::Get { key } => {
+                        let db = db.lock().await;
+
+                        let message = if let Some(value) = db.get(&key) {
+                            Message::BulkString {
+                                data: value.to_string(),
+                            }
+                        } else {
+                            Message::Null
+                        };
+
+                        stream
+                            .write_all(&message.serialize())
+                            .await
+                            .context("Failed to write Get response")?;
                     }
                 }
             }

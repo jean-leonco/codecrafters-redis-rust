@@ -232,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
                         stream
                             .write_all(
                                 &Message::SimpleString {
-                                    data: String::from("Ok"),
+                                    data: String::from("OK"),
                                 }
                                 .serialize(),
                             )

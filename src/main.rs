@@ -64,14 +64,14 @@ impl Message {
         }
     }
 
-    fn as_buf(self) -> Vec<u8> {
+    fn serialize(self) -> Vec<u8> {
         match self {
             Message::Array { elements } => {
                 let mut buf: Vec<u8> = Vec::new();
                 buf.extend(format!("*{}\r\n", elements.len()).as_bytes());
 
                 for element in elements {
-                    buf.extend(element.as_buf());
+                    buf.extend(element.serialize());
                 }
 
                 buf
@@ -158,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Command::Echo { message } => {
                         stream
-                            .write_all(&Message::BulkString { data: message }.as_buf())
+                            .write_all(&Message::BulkString { data: message }.serialize())
                             .await
                             .context("Failed to write echo response")?;
                     }

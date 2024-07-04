@@ -1,6 +1,10 @@
+use std::{
+    fmt,
+    io::{BufRead, Cursor, Read},
+};
+
 use anyhow::{Context, Ok};
 use bytes::Buf;
-use std::io::{BufRead, Cursor, Read};
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::TcpListener,
@@ -12,37 +16,28 @@ enum Message {
     BulkString { data: String },
 }
 
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Message::Array { .. } => write!(f, "Array"),
+            Message::BulkString { .. } => write!(f, "BulkString"),
+        }
+    }
+}
+
 impl Message {
     fn from_buf(cursor: &mut Cursor<&[u8]>) -> anyhow::Result<Message> {
-        // redis-cli PING -> "*1\r\n$4\r\nPING\r\n"
-        // redis-cli ECHO heyyyyyyyyyyyyyyyyy -> "*2\r\n$4\r\nECHO\r\n$19\r\nheyyyyyyyyyyyyyyyyy\r\n"
-
-        // 1. get first byte to identify type -> Array, BulkString, SimpleString
-        // 2. if array, get the expected size and create Vec::with_capacity
-        // 2.1 loop throw size
-        // 2.1.3 pass the cursos to from_buf
-        // 2.1.4 push result to elements
-        // 2.2 return value
-        // 3. if bulk string, get the expected size and read exact bytes
-        // 3.1 return value
-
-        // maybe consume should be used to avoid trim
-        // or read until
-
         let first_byte = cursor.get_u8();
 
         let mut size_buf = Vec::new();
         cursor
-            .read_until(b'\r', &mut size_buf)
+            .read_until(b'\n', &mut size_buf)
             .context("Failed to read message size")?;
 
-        // NOTE: is there an easier way to convert buf to usize?
-        let size: usize = String::from_utf8(size_buf)
+        let size: usize = std::str::from_utf8(&size_buf[..size_buf.len() - 2])
             .context("Failed to convert message size to string")?
             .parse::<usize>()
             .context("Failed to convert message size to usize")?;
-        // skip \n
-        cursor.consume(1);
 
         match first_byte {
             b'*' => {
@@ -56,17 +51,34 @@ impl Message {
                 Ok(Message::Array { elements })
             }
             b'$' => {
-                let mut data = Vec::with_capacity(size);
+                let mut data = vec![0; size + 2];
                 Read::read_exact(cursor, &mut data).context("Failed to read Bulk String")?;
-                // skip \r\n
-                cursor.consume(2);
 
                 Ok(Message::BulkString {
-                    data: String::from_utf8(data)
-                        .context("Failed to convert Bulk String to data")?,
+                    data: std::str::from_utf8(&data[..data.len() - 2])
+                        .context("Failed to convert Bulk String to data")?
+                        .to_string(),
                 })
             }
             _ => anyhow::bail!("Message type not supported {}", first_byte),
+        }
+    }
+
+    fn as_buf(self) -> Vec<u8> {
+        match self {
+            Message::Array { elements } => {
+                let mut buf: Vec<u8> = Vec::new();
+                buf.extend(format!("*{}\r\n", elements.len()).as_bytes());
+
+                for element in elements {
+                    buf.extend(element.as_buf());
+                }
+
+                buf
+            }
+            Message::BulkString { data } => format!("${}\r\n{}\r\n", data.len(), data)
+                .as_bytes()
+                .to_vec(),
         }
     }
 }
@@ -83,16 +95,30 @@ impl Command {
 
         // TODO: improve this
         match message {
-            Message::Array { elements } => match elements.get(0) {
-                Some(Message::BulkString { data }) => match data.to_lowercase().as_str() {
-                    "ping" => Ok(Command::Ping),
-                    "echo" => Ok(Command::Echo {
-                        message: String::from("heey"),
-                    }),
-                    _ => anyhow::bail!("Command not implemented"),
-                },
-                _ => anyhow::bail!("Command must be a Bulk String"),
-            },
+            Message::Array { elements } => {
+                match elements.get(0).expect("Message should have command") {
+                    Message::BulkString { data } => match data.to_lowercase().as_str() {
+                        "ping" => Ok(Command::Ping),
+                        "echo" => {
+                            let message = elements
+                                .get(1)
+                                .expect("ECHO message should have response string");
+
+                            Ok(Command::Echo {
+                                message: match message {
+                                    Message::BulkString { data } => data.to_string(),
+                                    _ => anyhow::bail!(
+                                        "Message type not support for ECHO {}",
+                                        message
+                                    ),
+                                },
+                            })
+                        }
+                        _ => anyhow::bail!("Command not implemented"),
+                    },
+                    _ => anyhow::bail!("Command must be a Bulk String"),
+                }
+            }
             _ => anyhow::bail!("Command must be a Array"),
         }
     }
@@ -109,7 +135,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let (mut stream, _) = listener.accept().await.context("Failed to get client")?;
 
-        let result = tokio::spawn(async move {
+        tokio::spawn(async move {
             let mut buf = [0; 1024];
             loop {
                 let bytes_read = stream
@@ -132,7 +158,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     Command::Echo { message } => {
                         stream
-                            .write_all(format!("${}\r\n{}\r\n", message.len(), message).as_bytes())
+                            .write_all(&Message::BulkString { data: message }.as_buf())
                             .await
                             .context("Failed to write echo response")?;
                     }

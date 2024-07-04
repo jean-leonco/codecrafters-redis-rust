@@ -46,6 +46,7 @@ impl Message {
                     .context("Failed to convert Array size to string")?
                     .parse::<usize>()
                     .context("Failed to convert Array size to usize")?;
+
                 let mut elements = Vec::with_capacity(size);
                 for i in 0..size {
                     let message = Message::from_buf(cursor)
@@ -64,8 +65,9 @@ impl Message {
                     .context("Failed to convert BulkString size to string")?
                     .parse::<usize>()
                     .context("Failed to convert BulkString size to usize")?;
+
                 let mut data = vec![0; size + 2];
-                Read::read_exact(cursor, &mut data).context("Failed to read BulkString")?;
+                Read::read_exact(cursor, &mut data).context("Failed to read BulkString data")?;
 
                 Ok(Message::BulkString {
                     data: std::str::from_utf8(&data[..data.len() - 2])
@@ -77,7 +79,7 @@ impl Message {
                 let mut data_buf: Vec<u8> = Vec::new();
                 cursor
                     .read_until(b'\n', &mut data_buf)
-                    .context("Failed to SimpleString data")?;
+                    .context("Failed to read SimpleString data")?;
 
                 Ok(Message::SimpleString {
                     data: std::str::from_utf8(&&data_buf[..data_buf.len() - 2])

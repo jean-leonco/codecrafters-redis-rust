@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Cursor, sync::Arc};
+use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
 
 use anyhow::{Context, Ok};
 use message::Message;
@@ -7,10 +7,20 @@ use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
 pub(crate) mod message;
 
 enum Command {
-    Ping { message: Option<String> },
-    Echo { message: String },
-    Set { key: String, value: String },
-    Get { key: String },
+    Ping {
+        message: Option<String>,
+    },
+    Echo {
+        message: String,
+    },
+    Set {
+        key: String,
+        value: String,
+        expiration: Option<u128>,
+    },
+    Get {
+        key: String,
+    },
 }
 
 impl Command {
@@ -51,6 +61,41 @@ impl Command {
                         "set" => {
                             let key = elements.get(1).expect("SET message should have key");
                             let value = elements.get(2).expect("SET message should have value");
+                            let mut expiration = None;
+
+                            for option in elements[3..].windows(2) {
+                                let option_key =
+                                    option.get(0).expect("SET message option should have key");
+                                let option_value =
+                                    option.get(1).expect("SET message option should have value");
+
+                                match option_key {
+                                    Message::BulkString { data } => {
+                                        if data.to_lowercase() == "px" {
+                                            expiration = match option_value {
+                                                Message::BulkString { data } => Some(
+                                                    data.parse::<u128>().with_context(|| {
+                                                        format!(
+                                                            "Failed to parse expiration time {}",
+                                                            data
+                                                        )
+                                                    })?,
+                                                ),
+                                                _ => anyhow::bail!(
+                                                    "Option key value not support by SET {}",
+                                                    option_value
+                                                ),
+                                            };
+                                        }
+                                    }
+                                    _ => {
+                                        anyhow::bail!(
+                                            "Option key type not support by SET {}",
+                                            option_key
+                                        )
+                                    }
+                                }
+                            }
 
                             Ok(Command::Set {
                                 key: match key {
@@ -61,6 +106,7 @@ impl Command {
                                     Message::BulkString { data } => data.to_string(),
                                     _ => anyhow::bail!("Message type not support by SET {}", value),
                                 },
+                                expiration,
                             })
                         }
                         "get" => {
@@ -83,11 +129,17 @@ impl Command {
     }
 }
 
+#[derive(Hash, Debug)]
+struct Entry {
+    value: String,
+    ttl: Option<u128>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("Logs from your program will appear here!");
 
-    let db = Arc::new(Mutex::new(HashMap::new()));
+    let db = Arc::new(Mutex::new(HashMap::<String, Entry>::new()));
 
     let listener = TcpListener::bind("127.0.0.1:6379")
         .await
@@ -132,9 +184,25 @@ async fn main() -> anyhow::Result<()> {
                             .await
                             .context("Failed to send ECHO reply")?;
                     }
-                    Command::Set { key, value } => {
+                    Command::Set {
+                        key,
+                        value,
+                        expiration,
+                    } => {
                         let mut db = db.lock().await;
-                        db.insert(key, value);
+                        let ttl = match expiration {
+                            Some(expiration) => {
+                                let now = SystemTime::now()
+                                    .duration_since(SystemTime::UNIX_EPOCH)
+                                    .context("SystemTime before UNIX EPOCH!")?
+                                    .as_millis();
+
+                                Some(now + expiration)
+                            }
+                            None => None,
+                        };
+
+                        db.insert(key, Entry { value, ttl });
 
                         let message = Message::SimpleString {
                             data: String::from("OK"),
@@ -146,11 +214,21 @@ async fn main() -> anyhow::Result<()> {
                             .context("Failed to send SET reply")?
                     }
                     Command::Get { key } => {
-                        let db = db.lock().await;
+                        let mut db = db.lock().await;
 
                         let message = if let Some(value) = db.get(&key) {
-                            Message::BulkString {
-                                data: value.to_string(),
+                            let now = SystemTime::now()
+                                .duration_since(SystemTime::UNIX_EPOCH)
+                                .context("SystemTime before UNIX EPOCH!")?
+                                .as_millis();
+
+                            if value.ttl.is_some_and(|value| now > value) {
+                                db.remove(&key);
+                                Message::Null
+                            } else {
+                                Message::BulkString {
+                                    data: value.value.to_string(),
+                                }
                             }
                         } else {
                             Message::Null

@@ -2,7 +2,7 @@ use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
-use commands::{echo, get, info, ping, set, Command};
+use commands::parse_command;
 use db::{new_db, Db};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -56,19 +56,8 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
             break;
         }
 
-        let command = Command::from_buf(&mut buf[..bytes_read])?;
-
-        match command {
-            Command::Ping { message } => ping::handle(message, &mut stream).await?,
-            Command::Echo { message } => echo::handle(message, &mut stream).await?,
-            Command::Set {
-                key,
-                value,
-                expiration,
-            } => set::handle(&db, key, value, expiration, &mut stream).await?,
-            Command::Get { key } => get::handle(&db, key, &mut stream).await?,
-            Command::Info { sections } => info::handle(sections, &mut stream).await?,
-        }
+        let command = parse_command(&mut buf[..bytes_read])?;
+        command.handle(&mut stream, &db).await?;
     }
 
     Ok(())

@@ -1,9 +1,13 @@
-use std::{collections::HashSet, io::Cursor};
+use std::io::Cursor;
 
 use anyhow::{Context, Ok};
-use info::InfoSection;
+use async_trait::async_trait;
+use tokio::net::TcpStream;
 
-use crate::message::{Array, BulkString, Message};
+use crate::{
+    db::Db,
+    message::{Array, BulkString, Message},
+};
 
 pub(crate) mod echo;
 pub(crate) mod get;
@@ -11,95 +15,35 @@ pub(crate) mod info;
 pub(crate) mod ping;
 pub(crate) mod set;
 
-#[derive(Debug)]
-pub(crate) enum Command {
-    Ping {
-        message: Option<String>,
-    },
-    Echo {
-        message: String,
-    },
-    Set {
-        key: String,
-        value: String,
-        expiration: Option<u128>,
-    },
-    Get {
-        key: String,
-    },
-    Info {
-        sections: HashSet<InfoSection>,
-    },
+#[async_trait]
+pub(crate) trait Command: Send {
+    fn new(args: &[BulkString]) -> anyhow::Result<Self>
+    where
+        Self: Sized;
+
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()>;
 }
 
-impl Command {
-    pub(crate) fn from_buf(buf: &mut [u8]) -> anyhow::Result<Command> {
-        let message: Array = Message::deserialize(&mut Cursor::new(buf))
-            .context("Failed to parse message")?
-            .try_into()?;
+pub(crate) fn parse_command(buf: &mut [u8]) -> anyhow::Result<Box<dyn Command>> {
+    let message: Array = Message::deserialize(&mut Cursor::new(buf))
+        .context("Failed to parse message")?
+        .try_into()?;
 
-        let elements: Vec<BulkString> = message
-            .elements
-            .iter()
-            .map(|value| value.try_into().unwrap())
-            .collect();
+    let args: Vec<BulkString> = message
+        .elements
+        .iter()
+        .map(|value| value.try_into().unwrap())
+        .collect();
 
-        let command = elements.first().expect("Message should have command");
+    let command = args.first().expect("Message should have command");
+    let command_args = &args[1..];
 
-        match command.data.to_lowercase().as_str() {
-            "ping" => {
-                let message = elements.get(1).map(|value| value.data.to_string());
-
-                Ok(Command::Ping { message })
-            }
-            "echo" => {
-                let message = elements
-                    .get(1)
-                    .expect("ECHO message should have reply string");
-
-                Ok(Command::Echo {
-                    message: message.data.to_string(),
-                })
-            }
-            "set" => {
-                let key = elements.get(1).expect("SET message should have key");
-                let value = elements.get(2).expect("SET message should have value");
-                let mut expiration = None;
-
-                for option in elements[3..].windows(2) {
-                    let option_key = option.first().expect("SET message option should have key");
-                    let option_value = option.get(1).expect("SET message option should have value");
-
-                    if option_key.data.to_lowercase() == "px" {
-                        expiration =
-                            Some(option_value.data.parse::<u128>().with_context(|| {
-                                format!("Failed to parse expiration time {}", option_value.data)
-                            })?);
-                    }
-                }
-
-                Ok(Command::Set {
-                    key: key.data.to_string(),
-                    value: value.data.to_string(),
-                    expiration,
-                })
-            }
-            "get" => {
-                let key = elements.get(1).expect("GET message should have key");
-
-                Ok(Command::Get {
-                    key: key.data.to_string(),
-                })
-            }
-            "info" => {
-                let mut sections = HashSet::new();
-                for element in elements[1..elements.len()].iter() {
-                    sections.insert(InfoSection::parse(element.data.to_string())?);
-                }
-
-                Ok(Command::Info { sections })
-            }
-            command => anyhow::bail!("Command not implemented: {}", command),
-        }
+    match command.data.to_lowercase().as_str() {
+        "ping" => Ok(Box::new(ping::PingCommand::new(command_args)?)),
+        "echo" => Ok(Box::new(echo::EchoCommand::new(command_args)?)),
+        "set" => Ok(Box::new(set::SetCommand::new(command_args)?)),
+        "get" => Ok(Box::new(get::GetCommand::new(command_args)?)),
+        "info" => Ok(Box::new(info::InfoCommand::new(command_args)?)),
+        command => anyhow::bail!("Command not implemented: {}", command),
     }
 }

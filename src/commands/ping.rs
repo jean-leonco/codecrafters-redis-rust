@@ -1,22 +1,39 @@
 use anyhow::Context;
+use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::message::{Message, SimpleString};
+use crate::{
+    db::Db,
+    message::{BulkString, Message, SimpleString},
+};
 
-pub(crate) async fn handle(
-    message: Option<String>,
-    stream: &mut TcpStream,
-) -> Result<(), anyhow::Error> {
-    let data = match message {
-        Some(message) => message,
-        None => String::from("PONG"),
-    };
+use super::Command;
 
-    let message = Message::SimpleString(SimpleString { data });
-    message
-        .send(stream)
-        .await
-        .context("Failed to send PING reply")?;
+#[derive(Debug)]
+pub(crate) struct PingCommand {
+    message: String,
+}
 
-    Ok(())
+#[async_trait]
+impl Command for PingCommand {
+    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+        Ok(Self {
+            message: match args.first() {
+                Some(value) => value.data.to_string(),
+                None => String::from("PONG"),
+            },
+        })
+    }
+
+    async fn handle(&self, stream: &mut TcpStream, _: &Db) -> anyhow::Result<()> {
+        let message = Message::SimpleString(SimpleString {
+            data: self.message.to_string(),
+        });
+        message
+            .send(stream)
+            .await
+            .context("Failed to send PING reply")?;
+
+        Ok(())
+    }
 }

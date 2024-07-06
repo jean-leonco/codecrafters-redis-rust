@@ -1,7 +1,7 @@
 use anyhow::Context;
 use tokio::net::TcpStream;
 
-use crate::message::Message;
+use crate::message::{Message, SimpleString};
 
 pub(crate) async fn handle(
     message: Option<String>,
@@ -12,7 +12,7 @@ pub(crate) async fn handle(
         None => String::from("PONG"),
     };
 
-    let message = Message::SimpleString { data };
+    let message = Message::SimpleString(SimpleString { data });
     message
         .send(stream)
         .await

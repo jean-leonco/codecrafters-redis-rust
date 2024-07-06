@@ -1,7 +1,10 @@
 use anyhow::Context;
 use tokio::net::TcpStream;
 
-use crate::{db::Db, message::Message};
+use crate::{
+    db::Db,
+    message::{BulkString, Message},
+};
 
 pub(crate) async fn handle(
     db: &Db,
@@ -15,9 +18,9 @@ pub(crate) async fn handle(
             db.remove(&key);
             Message::NullBulkString
         }
-        Some(value) => Message::BulkString {
+        Some(value) => Message::BulkString(BulkString {
             data: value.value.to_string(),
-        },
+        }),
         None => Message::NullBulkString,
     };
     message

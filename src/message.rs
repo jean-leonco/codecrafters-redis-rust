@@ -8,11 +8,26 @@ use bytes::Buf;
 use tokio::io::AsyncWriteExt;
 
 #[derive(Debug, Clone)]
+pub(crate) struct Array {
+    pub(crate) elements: Vec<Message>,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct BulkString {
+    pub(crate) data: String,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SimpleString {
+    pub(crate) data: String,
+}
+
+#[derive(Debug, Clone)]
 pub(crate) enum Message {
-    Array { elements: Vec<Message> },
-    BulkString { data: String },
+    Array(Array),
+    BulkString(BulkString),
     NullBulkString,
-    SimpleString { data: String },
+    SimpleString(SimpleString),
 }
 
 impl fmt::Display for Message {
@@ -22,6 +37,28 @@ impl fmt::Display for Message {
             Message::BulkString { .. } => write!(f, "BulkString"),
             Message::NullBulkString { .. } => write!(f, "NullBulkString"),
             Message::SimpleString { .. } => write!(f, "SimpleString"),
+        }
+    }
+}
+
+impl TryFrom<Message> for Array {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Message) -> anyhow::Result<Self> {
+        match value {
+            Message::Array(value) => Ok(value),
+            value => anyhow::bail!("Failed to convert message to Array: {}", value),
+        }
+    }
+}
+
+impl TryFrom<&Message> for BulkString {
+    type Error = anyhow::Error;
+
+    fn try_from(value: &Message) -> anyhow::Result<Self> {
+        match value {
+            Message::BulkString(value) => Ok(value.clone()),
+            value => anyhow::bail!("Failed to convert message to BulkString: {}", value),
         }
     }
 }
@@ -43,7 +80,7 @@ impl Message {
                     elements.push(message);
                 }
 
-                Ok(Message::Array { elements })
+                Ok(Message::Array(Array { elements }))
             }
             b'$' => {
                 if cursor.chunk()[0] == b'-' {
@@ -57,11 +94,11 @@ impl Message {
                         .context("Failed to read BulkString data")?;
                     anyhow::ensure!(data.len() >= 2, "BulkString data size should be at least 2");
 
-                    Ok(Message::BulkString {
+                    Ok(Message::BulkString(BulkString {
                         data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
                             .context("Failed to parse BulkString data")?
                             .to_string(),
-                    })
+                    }))
                 }
             }
             b'+' => {
@@ -71,11 +108,11 @@ impl Message {
                     .context("Failed to read SimpleString data")?;
                 anyhow::ensure!(data.len() >= 2, "BulkString data size should be at least 2");
 
-                Ok(Message::SimpleString {
+                Ok(Message::SimpleString(SimpleString {
                     data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
                         .context("Failed to parse SimpleString data")?
                         .to_string(),
-                })
+                }))
             }
             _ => anyhow::bail!("Unknown message type: {}", first_byte),
         }
@@ -86,16 +123,16 @@ impl Message {
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
     ) -> anyhow::Result<()> {
         match self {
-            Message::BulkString { data } => writer
-                .write_all(format!("${}\r\n{}\r\n", data.len(), data).as_bytes())
+            Message::BulkString(value) => writer
+                .write_all(format!("${}\r\n{}\r\n", value.data.len(), value.data).as_bytes())
                 .await
                 .context("Failed to write BulkString"),
             Message::NullBulkString => writer
                 .write_all(b"$-1\r\n")
                 .await
                 .context("Failed to write NullBulkString"),
-            Message::SimpleString { data } => writer
-                .write_all(format!("+{}\r\n", data).as_bytes())
+            Message::SimpleString(value) => writer
+                .write_all(format!("+{}\r\n", value.data).as_bytes())
                 .await
                 .context("Failed to write SimpleString"),
             Message::Array { .. } => unreachable!(),
@@ -107,13 +144,13 @@ impl Message {
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
     ) -> anyhow::Result<()> {
         match self {
-            Message::Array { elements } => {
+            Message::Array(value) => {
                 writer
-                    .write_all(format!("*{}", elements.len()).as_bytes())
+                    .write_all(format!("*{}", value.elements.len()).as_bytes())
                     .await
                     .context("Failed to write Array")?;
 
-                for element in elements {
+                for element in value.elements {
                     element.write_message(writer).await?;
                 }
             }

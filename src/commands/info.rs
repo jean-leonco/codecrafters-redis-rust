@@ -3,7 +3,7 @@ use std::{collections::HashSet, env, io::Write};
 use anyhow::{Context, Ok};
 use tokio::net::TcpStream;
 
-use crate::message::Message;
+use crate::message::{BulkString, Message};
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(crate) enum InfoSection {
@@ -29,7 +29,7 @@ pub(crate) async fn handle(
 ) -> anyhow::Result<()> {
     let mut buf = Vec::new();
 
-    if sections.len() == 0 || sections.contains(&InfoSection::Default) {
+    if sections.is_empty() || sections.contains(&InfoSection::Default) {
         get_default_info(&mut buf)?
     } else {
         for section in sections {
@@ -45,9 +45,9 @@ pub(crate) async fn handle(
         }
     }
 
-    let message = Message::BulkString {
+    let message = Message::BulkString(BulkString {
         data: String::from_utf8(buf)?,
-    };
+    });
     message
         .send(stream)
         .await
@@ -58,7 +58,7 @@ pub(crate) async fn handle(
 
 fn get_default_info(writer: &mut impl Write) -> anyhow::Result<()> {
     get_server_info(writer).context("Failed to get server info")?;
-    writeln!(writer, "")?;
+    writeln!(writer)?;
     get_replication_info(writer).context("Failed to get replication info")?;
 
     Ok(())

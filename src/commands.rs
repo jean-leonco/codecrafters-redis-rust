@@ -3,7 +3,7 @@ use std::{collections::HashSet, io::Cursor};
 use anyhow::{Context, Ok};
 use info::InfoSection;
 
-use crate::message::Message;
+use crate::message::{Array, BulkString, Message};
 
 pub(crate) mod echo;
 pub(crate) mod get;
@@ -34,122 +34,72 @@ pub(crate) enum Command {
 
 impl Command {
     pub(crate) fn from_buf(buf: &mut [u8]) -> anyhow::Result<Command> {
-        let message =
-            Message::deserialize(&mut Cursor::new(buf)).context("Failed to parse message")?;
+        let message: Array = Message::deserialize(&mut Cursor::new(buf))
+            .context("Failed to parse message")?
+            .try_into()?;
 
-        // TODO: improve this
-        match message {
-            Message::Array { elements } => {
-                let element = elements.first().expect("Message should have command");
+        let elements: Vec<BulkString> = message
+            .elements
+            .iter()
+            .map(|value| value.try_into().unwrap())
+            .collect();
 
-                match element {
-                    Message::BulkString { data } => match data.to_lowercase().as_str() {
-                        "ping" => {
-                            let message = elements.get(1);
-                            let message = match message {
-                                Some(Message::BulkString { data }) => Some(data.to_string()),
-                                Some(message) => {
-                                    anyhow::bail!("Message type not support by PING {}", message)
-                                }
-                                None => None,
-                            };
+        let command = elements.first().expect("Message should have command");
 
-                            Ok(Command::Ping { message })
-                        }
-                        "echo" => {
-                            let message = elements
-                                .get(1)
-                                .expect("ECHO message should have reply string");
-                            let message = match message {
-                                Message::BulkString { data } => data.to_string(),
-                                _ => anyhow::bail!("Message type not support by ECHO {}", message),
-                            };
+        match command.data.to_lowercase().as_str() {
+            "ping" => {
+                let message = elements.get(1).map(|value| value.data.to_string());
 
-                            Ok(Command::Echo { message })
-                        }
-                        "set" => {
-                            let key = elements.get(1).expect("SET message should have key");
-                            let value = elements.get(2).expect("SET message should have value");
-                            let mut expiration = None;
-
-                            for option in elements[3..].windows(2) {
-                                let option_key =
-                                    option.first().expect("SET message option should have key");
-                                let option_value =
-                                    option.get(1).expect("SET message option should have value");
-
-                                match option_key {
-                                    Message::BulkString { data } => {
-                                        if data.to_lowercase() == "px" {
-                                            expiration = match option_value {
-                                                Message::BulkString { data } => Some(
-                                                    data.parse::<u128>().with_context(|| {
-                                                        format!(
-                                                            "Failed to parse expiration time {}",
-                                                            data
-                                                        )
-                                                    })?,
-                                                ),
-                                                _ => anyhow::bail!(
-                                                    "Option key value not support by SET {}",
-                                                    option_value
-                                                ),
-                                            };
-                                        }
-                                    }
-                                    _ => {
-                                        anyhow::bail!(
-                                            "Option key type not support by SET {}",
-                                            option_key
-                                        )
-                                    }
-                                }
-                            }
-
-                            Ok(Command::Set {
-                                key: match key {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by SET {}", key),
-                                },
-                                value: match value {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by SET {}", value),
-                                },
-                                expiration,
-                            })
-                        }
-                        "get" => {
-                            let key = elements.get(1).expect("GET message should have key");
-
-                            Ok(Command::Get {
-                                key: match key {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by GET {}", key),
-                                },
-                            })
-                        }
-                        "info" => {
-                            let mut sections = HashSet::new();
-                            for element in elements[1..elements.len()].iter() {
-                                match element {
-                                    Message::BulkString { data } => {
-                                        sections.insert(InfoSection::parse(data.to_string())?);
-                                    }
-                                    message => anyhow::bail!(
-                                        "Message type not support by INFO {}",
-                                        message
-                                    ),
-                                }
-                            }
-
-                            Ok(Command::Info { sections })
-                        }
-                        command => anyhow::bail!("Command not implemented: {}", command),
-                    },
-                    message => anyhow::bail!("Command must be a BulkString. Got {}", message),
-                }
+                Ok(Command::Ping { message })
             }
-            message => anyhow::bail!("Command must be a Array. Got {}", message),
+            "echo" => {
+                let message = elements
+                    .get(1)
+                    .expect("ECHO message should have reply string");
+
+                Ok(Command::Echo {
+                    message: message.data.to_string(),
+                })
+            }
+            "set" => {
+                let key = elements.get(1).expect("SET message should have key");
+                let value = elements.get(2).expect("SET message should have value");
+                let mut expiration = None;
+
+                for option in elements[3..].windows(2) {
+                    let option_key = option.first().expect("SET message option should have key");
+                    let option_value = option.get(1).expect("SET message option should have value");
+
+                    if option_key.data.to_lowercase() == "px" {
+                        expiration =
+                            Some(option_value.data.parse::<u128>().with_context(|| {
+                                format!("Failed to parse expiration time {}", option_value.data)
+                            })?);
+                    }
+                }
+
+                Ok(Command::Set {
+                    key: key.data.to_string(),
+                    value: value.data.to_string(),
+                    expiration,
+                })
+            }
+            "get" => {
+                let key = elements.get(1).expect("GET message should have key");
+
+                Ok(Command::Get {
+                    key: key.data.to_string(),
+                })
+            }
+            "info" => {
+                let mut sections = HashSet::new();
+                for element in elements[1..elements.len()].iter() {
+                    sections.insert(InfoSection::parse(element.data.to_string())?);
+                }
+
+                Ok(Command::Info { sections })
+            }
+            command => anyhow::bail!("Command not implemented: {}", command),
         }
     }
 }

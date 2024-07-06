@@ -89,7 +89,7 @@ async fn remove_expired_keys(db: Db) {
         for (key, value) in keys_to_delete {
             if value.is_expired() {
                 db.remove(key);
-                println!("entry {} deleted", key);
+                println!("Entry {} deleted", key);
             }
         }
     }

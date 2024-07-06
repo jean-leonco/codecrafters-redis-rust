@@ -3,7 +3,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     db::{Db, Entry},
-    message::Message,
+    message::{Message, SimpleString},
 };
 
 pub(crate) async fn handle(
@@ -16,9 +16,9 @@ pub(crate) async fn handle(
     let mut db = db.lock().await;
     db.insert(key, Entry::new(value, expiration));
 
-    let message = Message::SimpleString {
+    let message = Message::SimpleString(SimpleString {
         data: String::from("OK"),
-    };
+    });
     message
         .send(stream)
         .await

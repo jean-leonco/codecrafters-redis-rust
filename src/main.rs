@@ -7,7 +7,7 @@ use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
 pub(crate) mod message;
 
 enum Command {
-    Ping,
+    Ping { message: Option<String> },
     Echo { message: String },
     Set { key: String, value: String },
     Get { key: String },
@@ -21,23 +21,32 @@ impl Command {
         // TODO: improve this
         match message {
             Message::Array { elements } => {
-                match elements.get(0).expect("Message should have command") {
+                let element = elements.get(0).expect("Message should have command");
+
+                match element {
                     Message::BulkString { data } => match data.to_lowercase().as_str() {
-                        "ping" => Ok(Command::Ping),
+                        "ping" => {
+                            let message = elements.get(1);
+                            let message = match message {
+                                Some(Message::BulkString { data }) => Some(data.to_string()),
+                                Some(message) => {
+                                    anyhow::bail!("Message type not support by PING {}", message)
+                                }
+                                None => None,
+                            };
+
+                            Ok(Command::Ping { message })
+                        }
                         "echo" => {
                             let message = elements
                                 .get(1)
-                                .expect("ECHO message should have response string");
+                                .expect("ECHO message should have reply string");
+                            let message = match message {
+                                Message::BulkString { data } => data.to_string(),
+                                _ => anyhow::bail!("Message type not support by ECHO {}", message),
+                            };
 
-                            Ok(Command::Echo {
-                                message: match message {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!(
-                                        "Message type not support by ECHO {}",
-                                        message
-                                    ),
-                                },
-                            })
+                            Ok(Command::Echo { message })
                         }
                         "set" => {
                             let key = elements.get(1).expect("SET message should have key");
@@ -103,10 +112,12 @@ async fn main() -> anyhow::Result<()> {
                     Command::from_buf(&mut buf[..bytes_read]).context("Failed to parse command")?;
 
                 match command {
-                    Command::Ping => {
-                        let message = Message::SimpleString {
-                            data: String::from("PONG"),
+                    Command::Ping { message } => {
+                        let data = match message {
+                            Some(message) => message,
+                            None => String::from("PONG"),
                         };
+                        let message = Message::SimpleString { data };
 
                         message
                             .send(&mut stream)

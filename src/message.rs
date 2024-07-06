@@ -11,8 +11,8 @@ use tokio::io::AsyncWriteExt;
 pub(crate) enum Message {
     Array { elements: Vec<Message> },
     BulkString { data: String },
+    NullBulkString,
     SimpleString { data: String },
-    Null,
 }
 
 impl fmt::Display for Message {
@@ -20,8 +20,8 @@ impl fmt::Display for Message {
         match self {
             Message::Array { .. } => write!(f, "Array"),
             Message::BulkString { .. } => write!(f, "BulkString"),
+            Message::NullBulkString { .. } => write!(f, "NullBulkString"),
             Message::SimpleString { .. } => write!(f, "SimpleString"),
-            Message::Null { .. } => write!(f, "Null"),
         }
     }
 }
@@ -46,18 +46,22 @@ impl Message {
                 Ok(Message::Array { elements })
             }
             b'$' => {
-                let size = parse_size(cursor).context("Failed to parse BulkString size")?;
+                if cursor.chunk()[0] == b'-' {
+                    Ok(Message::NullBulkString)
+                } else {
+                    let size = parse_size(cursor).context("Failed to parse BulkString size")?;
 
-                let mut data = vec![0; size + TERMINATOR_SIZE];
-                cursor
-                    .read_exact(&mut data)
-                    .context("Failed to read BulkString data")?;
+                    let mut data = vec![0; size + TERMINATOR_SIZE];
+                    cursor
+                        .read_exact(&mut data)
+                        .context("Failed to read BulkString data")?;
 
-                Ok(Message::BulkString {
-                    data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
-                        .context("Failed to parse BulkString data")?
-                        .to_string(),
-                })
+                    Ok(Message::BulkString {
+                        data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
+                            .context("Failed to parse BulkString data")?
+                            .to_string(),
+                    })
+                }
             }
             b'+' => {
                 let mut data: Vec<u8> = Vec::new();
@@ -70,11 +74,6 @@ impl Message {
                         .context("Failed to parse SimpleString data")?
                         .to_string(),
                 })
-            }
-            b'_' => {
-                cursor.advance(TERMINATOR_SIZE);
-
-                Ok(Message::Null)
             }
             _ => anyhow::bail!("Unknown message type {}", first_byte),
         }
@@ -95,8 +94,8 @@ impl Message {
             Message::BulkString { data } => format!("${}\r\n{}\r\n", data.len(), data)
                 .as_bytes()
                 .to_vec(),
+            Message::NullBulkString => b"$-1\r\n".to_vec(),
             Message::SimpleString { data } => format!("+{}\r\n", data).as_bytes().to_vec(),
-            Message::Null => "_\r\n".as_bytes().to_vec(),
         }
     }
 

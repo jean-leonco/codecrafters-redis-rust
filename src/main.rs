@@ -224,14 +224,14 @@ async fn main() -> anyhow::Result<()> {
 
                             if value.ttl.is_some_and(|value| now > value) {
                                 db.remove(&key);
-                                Message::Null
+                                Message::NullBulkString
                             } else {
                                 Message::BulkString {
                                     data: value.value.to_string(),
                                 }
                             }
                         } else {
-                            Message::Null
+                            Message::NullBulkString
                         };
 
                         message

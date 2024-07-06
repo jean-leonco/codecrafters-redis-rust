@@ -70,7 +70,7 @@ impl Message {
                     .context("Failed to read SimpleString data")?;
 
                 Ok(Message::SimpleString {
-                    data: std::str::from_utf8(&&data[..data.len() - TERMINATOR_SIZE])
+                    data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
                         .context("Failed to parse SimpleString data")?
                         .to_string(),
                 })

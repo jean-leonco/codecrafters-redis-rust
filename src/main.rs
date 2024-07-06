@@ -34,7 +34,7 @@ impl Command {
         // TODO: improve this
         match message {
             Message::Array { elements } => {
-                let element = elements.get(0).expect("Message should have command");
+                let element = elements.first().expect("Message should have command");
 
                 match element {
                     Message::BulkString { data } => match data.to_lowercase().as_str() {
@@ -68,7 +68,7 @@ impl Command {
 
                             for option in elements[3..].windows(2) {
                                 let option_key =
-                                    option.get(0).expect("SET message option should have key");
+                                    option.first().expect("SET message option should have key");
                                 let option_value =
                                     option.get(1).expect("SET message option should have value");
 
@@ -222,7 +222,7 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
                 message
                     .send(&mut stream)
                     .await
-                    .context("Failed to send SET reply")?
+                    .context("Failed to send SET reply")?;
             }
             Command::Get { key } => {
                 let mut db = db.lock().await;

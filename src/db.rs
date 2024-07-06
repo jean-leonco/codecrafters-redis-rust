@@ -17,10 +17,7 @@ impl Entry {
 
         Self {
             value,
-            ttl: match expiration {
-                Some(expiration) => Some(now + expiration),
-                None => None,
-            },
+            ttl: expiration.map(|expiration| now + expiration),
         }
     }
 
@@ -37,7 +34,7 @@ impl Entry {
 
             now > ttl
         } else {
-            return false;
+            false
         }
     }
 }

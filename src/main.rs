@@ -1,11 +1,13 @@
 use std::{io::Cursor, result::Result::Ok, time::Duration};
 
 use anyhow::Context;
-use db::{new_db, Db, Entry};
+use commands::{echo, get, ping, set};
+use db::{new_db, Db};
 use message::Message;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 
+pub(crate) mod commands;
 pub(crate) mod db;
 pub(crate) mod message;
 
@@ -142,23 +144,8 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to bind port")?;
 
-    let cleanup_db = db.clone();
-    tokio::spawn(async move {
-        loop {
-            tokio::time::sleep(Duration::from_secs(1)).await;
-            let mut db = cleanup_db.lock().await;
-
-            let entries_db = db.clone();
-            let keys_to_delete = entries_db.iter().filter(|(_, value)| value.has_ttl());
-
-            for (key, value) in keys_to_delete {
-                if value.is_expired() {
-                    db.remove(key);
-                    println!("key {} deleted", key);
-                }
-            }
-        }
-    });
+    let routine_db = db.clone();
+    tokio::spawn(async move { remove_expired_keys(routine_db).await });
 
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;
@@ -188,65 +175,37 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
             Command::from_buf(&mut buf[..bytes_read]).context("Failed to parse command")?;
 
         match command {
-            Command::Ping { message } => {
-                let data = match message {
-                    Some(message) => message,
-                    None => String::from("PONG"),
-                };
-                let message = Message::SimpleString { data };
-
-                message
-                    .send(&mut stream)
-                    .await
-                    .context("Failed to send PING reply")?;
-            }
-            Command::Echo { message } => {
-                let message = Message::SimpleString { data: message };
-
-                message
-                    .send(&mut stream)
-                    .await
-                    .context("Failed to send ECHO reply")?;
-            }
+            Command::Ping { message } => ping::handle(message, &mut stream).await?,
+            Command::Echo { message } => echo::handle(message, &mut stream).await?,
             Command::Set {
                 key,
                 value,
                 expiration,
-            } => {
-                let mut db = db.lock().await;
-                db.insert(key, Entry::new(value, expiration));
-
-                let message = Message::SimpleString {
-                    data: String::from("OK"),
-                };
-                message
-                    .send(&mut stream)
-                    .await
-                    .context("Failed to send SET reply")?;
-            }
-            Command::Get { key } => {
-                let mut db = db.lock().await;
-
-                let message = if let Some(value) = db.get(&key) {
-                    if value.is_expired() {
-                        db.remove(&key);
-                        Message::NullBulkString
-                    } else {
-                        Message::BulkString {
-                            data: value.value.to_string(),
-                        }
-                    }
-                } else {
-                    Message::NullBulkString
-                };
-
-                message
-                    .send(&mut stream)
-                    .await
-                    .context("Failed to send GET reply")?;
-            }
+            } => set::handle(&db, key, value, expiration, &mut stream).await?,
+            Command::Get { key } => get::handle(&db, key, &mut stream).await?,
         }
     }
 
     Ok(())
+}
+
+async fn remove_expired_keys(db: Db) {
+    // TODO: improve how keys are expired.
+    // https://redis.io/docs/latest/commands/expire/#how-redis-expires-keys
+    // https://github.com/valkey-io/valkey/blob/unstable/src/expire.c
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut db = db.lock().await;
+
+        let entries_db = db.clone();
+        let keys_to_delete = entries_db.iter().filter(|(_, value)| value.has_ttl());
+
+        for (key, value) in keys_to_delete {
+            if value.is_expired() {
+                db.remove(key);
+                println!("entry {} deleted", key);
+            }
+        }
+    }
 }

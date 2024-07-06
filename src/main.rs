@@ -2,7 +2,7 @@ use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
-use commands::{echo, get, ping, set, Command};
+use commands::{echo, get, info, ping, set, Command};
 use db::{new_db, Db};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -67,6 +67,7 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
                 expiration,
             } => set::handle(&db, key, value, expiration, &mut stream).await?,
             Command::Get { key } => get::handle(&db, key, &mut stream).await?,
+            Command::Info { sections } => info::handle(sections, &mut stream).await?,
         }
     }
 

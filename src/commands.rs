@@ -1,14 +1,17 @@
-use std::io::Cursor;
+use std::{collections::HashSet, io::Cursor};
 
-use anyhow::Context;
+use anyhow::{Context, Ok};
+use info::InfoSection;
 
 use crate::message::Message;
 
 pub(crate) mod echo;
 pub(crate) mod get;
+pub(crate) mod info;
 pub(crate) mod ping;
 pub(crate) mod set;
 
+#[derive(Debug)]
 pub(crate) enum Command {
     Ping {
         message: Option<String>,
@@ -23,6 +26,9 @@ pub(crate) enum Command {
     },
     Get {
         key: String,
+    },
+    Info {
+        sections: HashSet<InfoSection>,
     },
 }
 
@@ -121,6 +127,22 @@ impl Command {
                                     _ => anyhow::bail!("Message type not support by GET {}", key),
                                 },
                             })
+                        }
+                        "info" => {
+                            let mut sections = HashSet::new();
+                            for element in elements[1..elements.len()].iter() {
+                                match element {
+                                    Message::BulkString { data } => {
+                                        sections.insert(InfoSection::parse(data.to_string())?);
+                                    }
+                                    message => anyhow::bail!(
+                                        "Message type not support by INFO {}",
+                                        message
+                                    ),
+                                }
+                            }
+
+                            Ok(Command::Info { sections })
                         }
                         command => anyhow::bail!("Command not implemented: {}", command),
                     },

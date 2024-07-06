@@ -122,12 +122,12 @@ impl Command {
                                 },
                             })
                         }
-                        _ => anyhow::bail!("Command not implemented"),
+                        command => anyhow::bail!("Command not implemented: {}", command),
                     },
-                    _ => anyhow::bail!("Command must be a BulkString"),
+                    message => anyhow::bail!("Command must be a BulkString. Got {}", message),
                 }
             }
-            _ => anyhow::bail!("Command must be a Array"),
+            message => anyhow::bail!("Command must be a Array. Got {}", message),
         }
     }
 }

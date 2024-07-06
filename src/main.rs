@@ -38,9 +38,9 @@ async fn main() -> anyhow::Result<()> {
 
         let db = db.clone();
         tokio::spawn(async move {
-            handle_connection(stream, db)
-                .await
-                .context("Failed to handle connection")
+            if let Err(err) = handle_connection(stream, db).await {
+                eprintln!("ERROR: {}", err);
+            }
         });
     }
 }
@@ -56,8 +56,7 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
             break;
         }
 
-        let command =
-            Command::from_buf(&mut buf[..bytes_read]).context("Failed to parse command")?;
+        let command = Command::from_buf(&mut buf[..bytes_read])?;
 
         match command {
             Command::Ping { message } => ping::handle(message, &mut stream).await?,

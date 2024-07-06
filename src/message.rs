@@ -58,7 +58,7 @@ impl Message {
                     anyhow::ensure!(data.len() >= 2, "BulkString data size should be at least 2");
 
                     Ok(Message::BulkString {
-                        data: std::str::from_utf8(&data[..0])
+                        data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
                             .context("Failed to parse BulkString data")?
                             .to_string(),
                     })
@@ -77,7 +77,7 @@ impl Message {
                         .to_string(),
                 })
             }
-            _ => anyhow::bail!("Unknown message type {}", first_byte),
+            _ => anyhow::bail!("Unknown message type: {}", first_byte),
         }
     }
 

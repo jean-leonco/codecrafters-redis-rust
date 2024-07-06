@@ -1,9 +1,12 @@
-use std::{collections::HashMap, io::Cursor, sync::Arc, time::SystemTime};
+use std::{io::Cursor, result::Result::Ok, time::Duration};
 
-use anyhow::{Context, Ok};
+use anyhow::Context;
+use db::{new_db, Db, Entry};
 use message::Message;
-use tokio::{io::AsyncReadExt, net::TcpListener, sync::Mutex};
+use tokio::io::AsyncReadExt;
+use tokio::net::{TcpListener, TcpStream};
 
+pub(crate) mod db;
 pub(crate) mod message;
 
 enum Command {
@@ -129,120 +132,121 @@ impl Command {
     }
 }
 
-#[derive(Hash, Debug)]
-struct Entry {
-    value: String,
-    ttl: Option<u128>,
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("Logs from your program will appear here!");
 
-    let db = Arc::new(Mutex::new(HashMap::<String, Entry>::new()));
+    let db = new_db();
 
     let listener = TcpListener::bind("127.0.0.1:6379")
         .await
         .context("Failed to bind port")?;
 
-    loop {
-        let (mut stream, _) = listener.accept().await.context("Failed to get client")?;
-        let db = db.clone();
+    let cleanup_db = db.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let mut db = cleanup_db.lock().await;
 
-        tokio::spawn(async move {
-            let mut buf = [0; 1024];
-            loop {
-                let bytes_read = stream
-                    .read(&mut buf)
-                    .await
-                    .context("Failed to read stream")?;
-                if bytes_read == 0 {
-                    break;
-                }
+            let entries_db = db.clone();
+            let keys_to_delete = entries_db.iter().filter(|(_, value)| value.has_ttl());
 
-                let command =
-                    Command::from_buf(&mut buf[..bytes_read]).context("Failed to parse command")?;
-
-                match command {
-                    Command::Ping { message } => {
-                        let data = match message {
-                            Some(message) => message,
-                            None => String::from("PONG"),
-                        };
-                        let message = Message::SimpleString { data };
-
-                        message
-                            .send(&mut stream)
-                            .await
-                            .context("Failed to send PING reply")?;
-                    }
-                    Command::Echo { message } => {
-                        let message = Message::SimpleString { data: message };
-
-                        message
-                            .send(&mut stream)
-                            .await
-                            .context("Failed to send ECHO reply")?;
-                    }
-                    Command::Set {
-                        key,
-                        value,
-                        expiration,
-                    } => {
-                        let mut db = db.lock().await;
-                        let ttl = match expiration {
-                            Some(expiration) => {
-                                let now = SystemTime::now()
-                                    .duration_since(SystemTime::UNIX_EPOCH)
-                                    .context("SystemTime before UNIX EPOCH!")?
-                                    .as_millis();
-
-                                Some(now + expiration)
-                            }
-                            None => None,
-                        };
-
-                        db.insert(key, Entry { value, ttl });
-
-                        let message = Message::SimpleString {
-                            data: String::from("OK"),
-                        };
-
-                        message
-                            .send(&mut stream)
-                            .await
-                            .context("Failed to send SET reply")?
-                    }
-                    Command::Get { key } => {
-                        let mut db = db.lock().await;
-
-                        let message = if let Some(value) = db.get(&key) {
-                            let now = SystemTime::now()
-                                .duration_since(SystemTime::UNIX_EPOCH)
-                                .context("SystemTime before UNIX EPOCH!")?
-                                .as_millis();
-
-                            if value.ttl.is_some_and(|value| now > value) {
-                                db.remove(&key);
-                                Message::NullBulkString
-                            } else {
-                                Message::BulkString {
-                                    data: value.value.to_string(),
-                                }
-                            }
-                        } else {
-                            Message::NullBulkString
-                        };
-
-                        message
-                            .send(&mut stream)
-                            .await
-                            .context("Failed to send GET reply")?;
-                    }
+            for (key, value) in keys_to_delete {
+                if value.is_expired() {
+                    db.remove(key);
+                    println!("key {} deleted", key);
                 }
             }
+        }
+    });
 
-            Ok(())
+    loop {
+        let (stream, addr) = listener.accept().await.context("Failed to get client")?;
+        println!("Accepted connection from {}", addr);
+
+        let db = db.clone();
+        tokio::spawn(async move {
+            handle_connection(stream, db)
+                .await
+                .context("Failed to handle connection")
         });
     }
+}
+
+async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> {
+    let mut buf = [0; 1024];
+    loop {
+        let bytes_read = stream
+            .read(&mut buf)
+            .await
+            .context("Failed to read stream")?;
+        if bytes_read == 0 {
+            break;
+        }
+
+        let command =
+            Command::from_buf(&mut buf[..bytes_read]).context("Failed to parse command")?;
+
+        match command {
+            Command::Ping { message } => {
+                let data = match message {
+                    Some(message) => message,
+                    None => String::from("PONG"),
+                };
+                let message = Message::SimpleString { data };
+
+                message
+                    .send(&mut stream)
+                    .await
+                    .context("Failed to send PING reply")?;
+            }
+            Command::Echo { message } => {
+                let message = Message::SimpleString { data: message };
+
+                message
+                    .send(&mut stream)
+                    .await
+                    .context("Failed to send ECHO reply")?;
+            }
+            Command::Set {
+                key,
+                value,
+                expiration,
+            } => {
+                let mut db = db.lock().await;
+                db.insert(key, Entry::new(value, expiration));
+
+                let message = Message::SimpleString {
+                    data: String::from("OK"),
+                };
+                message
+                    .send(&mut stream)
+                    .await
+                    .context("Failed to send SET reply")?
+            }
+            Command::Get { key } => {
+                let mut db = db.lock().await;
+
+                let message = if let Some(value) = db.get(&key) {
+                    if value.is_expired() {
+                        db.remove(&key);
+                        Message::NullBulkString
+                    } else {
+                        Message::BulkString {
+                            data: value.value.to_string(),
+                        }
+                    }
+                } else {
+                    Message::NullBulkString
+                };
+
+                message
+                    .send(&mut stream)
+                    .await
+                    .context("Failed to send GET reply")?;
+            }
+        }
+    }
+
+    Ok(())
 }

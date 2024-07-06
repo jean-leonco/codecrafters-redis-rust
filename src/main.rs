@@ -144,8 +144,7 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to bind port")?;
 
-    let routine_db = db.clone();
-    tokio::spawn(async move { remove_expired_keys(routine_db).await });
+    tokio::spawn(remove_expired_keys(db.clone()));
 
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;

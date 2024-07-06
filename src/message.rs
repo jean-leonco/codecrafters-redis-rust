@@ -55,9 +55,10 @@ impl Message {
                     cursor
                         .read_exact(&mut data)
                         .context("Failed to read BulkString data")?;
+                    anyhow::ensure!(data.len() >= 2, "BulkString data size should be at least 2");
 
                     Ok(Message::BulkString {
-                        data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
+                        data: std::str::from_utf8(&data[..0])
                             .context("Failed to parse BulkString data")?
                             .to_string(),
                     })
@@ -68,6 +69,7 @@ impl Message {
                 cursor
                     .read_until(b'\n', &mut data)
                     .context("Failed to read SimpleString data")?;
+                anyhow::ensure!(data.len() >= 2, "BulkString data size should be at least 2");
 
                 Ok(Message::SimpleString {
                     data: std::str::from_utf8(&data[..data.len() - TERMINATOR_SIZE])
@@ -79,23 +81,24 @@ impl Message {
         }
     }
 
-    pub(crate) fn serialize(self) -> Vec<u8> {
+    async fn write_message(
+        self,
+        writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
+    ) -> anyhow::Result<()> {
         match self {
-            Message::Array { elements } => {
-                let mut buf: Vec<u8> = Vec::new();
-                buf.extend(format!("*{}\r\n", elements.len()).as_bytes());
-
-                for element in elements {
-                    buf.extend(element.serialize());
-                }
-
-                buf
-            }
-            Message::BulkString { data } => format!("${}\r\n{}\r\n", data.len(), data)
-                .as_bytes()
-                .to_vec(),
-            Message::NullBulkString => b"$-1\r\n".to_vec(),
-            Message::SimpleString { data } => format!("+{}\r\n", data).as_bytes().to_vec(),
+            Message::BulkString { data } => writer
+                .write_all(format!("${}\r\n{}\r\n", data.len(), data).as_bytes())
+                .await
+                .context("Failed to write BulkString"),
+            Message::NullBulkString => writer
+                .write_all(b"$-1\r\n")
+                .await
+                .context("Failed to write NullBulkString"),
+            Message::SimpleString { data } => writer
+                .write_all(format!("+{}\r\n", data).as_bytes())
+                .await
+                .context("Failed to write SimpleString"),
+            Message::Array { .. } => unreachable!(),
         }
     }
 
@@ -103,10 +106,19 @@ impl Message {
         self,
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
     ) -> anyhow::Result<()> {
-        writer
-            .write_all(&self.serialize())
-            .await
-            .context("Failed to send reply")?;
+        match self {
+            Message::Array { elements } => {
+                writer
+                    .write_all(format!("*{}", elements.len()).as_bytes())
+                    .await
+                    .context("Failed to write Array")?;
+
+                for element in elements {
+                    element.write_message(writer).await?;
+                }
+            }
+            _ => self.write_message(writer).await?,
+        }
 
         Ok(())
     }

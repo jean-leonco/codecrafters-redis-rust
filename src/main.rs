@@ -1,9 +1,9 @@
-use std::{io::Cursor, result::Result::Ok, time::Duration};
+use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
-use commands::{echo, get, ping, set};
+use clap::Parser;
+use commands::{echo, get, ping, set, Command};
 use db::{new_db, Db};
-use message::Message;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -11,127 +11,12 @@ pub(crate) mod commands;
 pub(crate) mod db;
 pub(crate) mod message;
 
-enum Command {
-    Ping {
-        message: Option<String>,
-    },
-    Echo {
-        message: String,
-    },
-    Set {
-        key: String,
-        value: String,
-        expiration: Option<u128>,
-    },
-    Get {
-        key: String,
-    },
-}
-
-impl Command {
-    fn from_buf(buf: &mut [u8]) -> anyhow::Result<Command> {
-        let message =
-            Message::deserialize(&mut Cursor::new(buf)).context("Failed to parse message")?;
-
-        // TODO: improve this
-        match message {
-            Message::Array { elements } => {
-                let element = elements.first().expect("Message should have command");
-
-                match element {
-                    Message::BulkString { data } => match data.to_lowercase().as_str() {
-                        "ping" => {
-                            let message = elements.get(1);
-                            let message = match message {
-                                Some(Message::BulkString { data }) => Some(data.to_string()),
-                                Some(message) => {
-                                    anyhow::bail!("Message type not support by PING {}", message)
-                                }
-                                None => None,
-                            };
-
-                            Ok(Command::Ping { message })
-                        }
-                        "echo" => {
-                            let message = elements
-                                .get(1)
-                                .expect("ECHO message should have reply string");
-                            let message = match message {
-                                Message::BulkString { data } => data.to_string(),
-                                _ => anyhow::bail!("Message type not support by ECHO {}", message),
-                            };
-
-                            Ok(Command::Echo { message })
-                        }
-                        "set" => {
-                            let key = elements.get(1).expect("SET message should have key");
-                            let value = elements.get(2).expect("SET message should have value");
-                            let mut expiration = None;
-
-                            for option in elements[3..].windows(2) {
-                                let option_key =
-                                    option.first().expect("SET message option should have key");
-                                let option_value =
-                                    option.get(1).expect("SET message option should have value");
-
-                                match option_key {
-                                    Message::BulkString { data } => {
-                                        if data.to_lowercase() == "px" {
-                                            expiration = match option_value {
-                                                Message::BulkString { data } => Some(
-                                                    data.parse::<u128>().with_context(|| {
-                                                        format!(
-                                                            "Failed to parse expiration time {}",
-                                                            data
-                                                        )
-                                                    })?,
-                                                ),
-                                                _ => anyhow::bail!(
-                                                    "Option key value not support by SET {}",
-                                                    option_value
-                                                ),
-                                            };
-                                        }
-                                    }
-                                    _ => {
-                                        anyhow::bail!(
-                                            "Option key type not support by SET {}",
-                                            option_key
-                                        )
-                                    }
-                                }
-                            }
-
-                            Ok(Command::Set {
-                                key: match key {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by SET {}", key),
-                                },
-                                value: match value {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by SET {}", value),
-                                },
-                                expiration,
-                            })
-                        }
-                        "get" => {
-                            let key = elements.get(1).expect("GET message should have key");
-
-                            Ok(Command::Get {
-                                key: match key {
-                                    Message::BulkString { data } => data.to_string(),
-                                    _ => anyhow::bail!("Message type not support by GET {}", key),
-                                },
-                            })
-                        }
-                        _ => anyhow::bail!("Command not implemented"),
-                    },
-                    _ => anyhow::bail!("Command must be a BulkString"),
-                }
-            }
-            _ => anyhow::bail!("Command must be a Array"),
-        }
-    }
+#[derive(Parser, Debug)]
+#[command()]
+struct Args {
+    #[arg(long, default_value_t = 6379)]
+    // https://stackoverflow.com/a/113228
+    port: u16,
 }
 
 #[tokio::main]
@@ -140,7 +25,8 @@ async fn main() -> anyhow::Result<()> {
 
     let db = new_db();
 
-    let listener = TcpListener::bind("127.0.0.1:6379")
+    let args = Args::parse();
+    let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port))
         .await
         .context("Failed to bind port")?;
 

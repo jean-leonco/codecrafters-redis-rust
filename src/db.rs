@@ -1,4 +1,8 @@
-use std::{collections::HashMap, sync::Arc, time::SystemTime};
+use std::{
+    collections::HashMap,
+    sync::Arc,
+    time::{Duration, SystemTime},
+};
 
 use tokio::sync::Mutex;
 
@@ -43,4 +47,25 @@ pub(crate) type Db = Arc<Mutex<HashMap<String, Entry>>>;
 
 pub(crate) fn new_db() -> Db {
     Arc::new(Mutex::new(HashMap::<String, Entry>::new()))
+}
+
+pub(crate) async fn remove_expired_keys(db: Db) {
+    // TODO: improve how keys are expired.
+    // https://redis.io/docs/latest/commands/expire/#how-redis-expires-keys
+    // https://github.com/valkey-io/valkey/blob/unstable/src/expire.c
+
+    loop {
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        let mut db = db.lock().await;
+
+        let entries_db = db.clone();
+        let keys_to_delete = entries_db.iter().filter(|(_, value)| value.has_ttl());
+
+        for (key, value) in keys_to_delete {
+            if value.is_expired() {
+                db.remove(key);
+                println!("Entry {} deleted", key);
+            }
+        }
+    }
 }

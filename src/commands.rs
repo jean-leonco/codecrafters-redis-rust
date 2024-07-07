@@ -14,6 +14,7 @@ pub(crate) mod echo;
 pub(crate) mod get;
 pub(crate) mod info;
 pub(crate) mod ping;
+pub(crate) mod psync;
 pub(crate) mod replconf;
 pub(crate) mod set;
 
@@ -56,6 +57,7 @@ pub(crate) fn parse_command(buf: &mut [u8]) -> anyhow::Result<Box<dyn Command>> 
         "get" => Ok(Box::new(get::GetCommand::new(command_args)?)),
         "info" => Ok(Box::new(info::InfoCommand::new(command_args)?)),
         "replconf" => Ok(Box::new(replconf::ReplConfCommand::new(command_args)?)),
+        "psync" => Ok(Box::new(psync::PSyncCommand::new(command_args)?)),
         command => anyhow::bail!("Command not implemented: {}", command),
     }
 }

@@ -59,13 +59,30 @@ impl Command for PSyncCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
-        let message = Message::simple_string(format!("FULLRESYNC {} 0", self.replication_id));
-        message
-            .send(stream)
-            .await
-            .context("Failed to send PSYNC reply")?;
+    async fn handle(
+        &self,
+        stream: &mut TcpStream,
+        _: &Db,
+        server_config: &ServerConfig,
+    ) -> anyhow::Result<()> {
+        match server_config {
+            ServerConfig::Master {
+                replication_id,
+                replication_offset,
+                ..
+            } => {
+                let message = Message::simple_string(format!(
+                    "FULLRESYNC {} {}",
+                    replication_id, replication_offset
+                ));
+                message
+                    .send(stream)
+                    .await
+                    .context("Failed to send PSYNC reply")?;
 
-        Ok(())
+                Ok(())
+            }
+            ServerConfig::Slave { .. } => anyhow::bail!("Slave can not handle PSYNC command"),
+        }
     }
 }

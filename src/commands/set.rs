@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     db::{Db, Entry},
-    message::{Array, BulkString, Message, SimpleString},
+    message::{Array, BulkString, Message},
     server_config::ServerConfig,
 };
 
@@ -87,9 +87,7 @@ impl Command for SetCommand {
             Entry::new(self.value.to_string(), self.expiration),
         );
 
-        let message = Message::SimpleString(SimpleString {
-            data: String::from("OK"),
-        });
+        let message = Message::ok_message();
         message
             .send(stream)
             .await

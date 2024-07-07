@@ -14,6 +14,7 @@ pub(crate) mod echo;
 pub(crate) mod get;
 pub(crate) mod info;
 pub(crate) mod ping;
+pub(crate) mod replconf;
 pub(crate) mod set;
 
 #[async_trait]
@@ -52,6 +53,7 @@ pub(crate) fn parse_command(buf: &mut [u8]) -> anyhow::Result<Box<dyn Command>> 
         "set" => Ok(Box::new(set::SetCommand::new(command_args)?)),
         "get" => Ok(Box::new(get::GetCommand::new(command_args)?)),
         "info" => Ok(Box::new(info::InfoCommand::new(command_args)?)),
+        "replconf" => Ok(Box::new(replconf::ReplConfCommand::new(command_args)?)),
         command => anyhow::bail!("Command not implemented: {}", command),
     }
 }

@@ -7,22 +7,22 @@ use anyhow::Context;
 use bytes::Buf;
 use tokio::io::AsyncWriteExt;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Array {
     pub(crate) elements: Vec<Message>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct BulkString {
     pub(crate) data: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SimpleString {
     pub(crate) data: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Message {
     Array(Array),
     BulkString(BulkString),
@@ -118,6 +118,16 @@ impl Message {
         }
     }
 
+    pub(crate) fn simple_string_message(data: String) -> Message {
+        Message::SimpleString(SimpleString { data })
+    }
+
+    pub(crate) fn ok_message() -> Message {
+        Message::SimpleString(SimpleString {
+            data: String::from("OK"),
+        })
+    }
+
     async fn write_message(
         self,
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
@@ -143,6 +153,8 @@ impl Message {
         self,
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
     ) -> anyhow::Result<()> {
+        println!("Writing message to writer {:?}", self);
+
         match self {
             Message::Array(value) => {
                 writer
@@ -156,6 +168,8 @@ impl Message {
             }
             _ => self.write_message(writer).await?,
         }
+
+        writer.flush().await?;
 
         Ok(())
     }

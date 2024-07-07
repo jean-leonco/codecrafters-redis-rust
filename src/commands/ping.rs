@@ -17,6 +17,12 @@ pub(crate) struct PingCommand {
     message: Option<String>,
 }
 
+impl PingCommand {
+    pub(crate) fn new_command(message: Option<String>) -> Self {
+        Self { message }
+    }
+}
+
 impl fmt::Display for PingCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "PING")

@@ -1,9 +1,10 @@
+use std::io::Cursor;
 use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
 use commands::Command;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 
 pub(crate) mod commands;
@@ -39,10 +40,7 @@ async fn main() -> anyhow::Result<()> {
             tokio::spawn(remove_expired_keys(db.clone()));
         }
         server_config::ServerConfig::Slave { master_address, .. } => {
-            let mut master_stream = TcpStream::connect(master_address).await?;
-
-            let ping_message = commands::ping::PingCommand::new(&[])?.to_message();
-            ping_message.send(&mut master_stream).await?;
+            tokio::spawn(send_handshake(master_address.to_string(), args.port));
         }
     };
 
@@ -102,4 +100,56 @@ async fn remove_expired_keys(db: db::Db) {
             }
         }
     }
+}
+
+async fn send_handshake(master_address: String, port: u16) -> anyhow::Result<()> {
+    let socket = TcpStream::connect(master_address).await?;
+    let (rd, wr) = tokio::io::split(socket);
+    let mut writer = BufWriter::new(wr);
+    let mut reader = BufReader::new(rd);
+
+    let mut buf = [0; 1024];
+    let pong_message = message::Message::simple_string_message(String::from("PONG"));
+    let ok_message = message::Message::ok_message();
+
+    let ping_message = commands::ping::PingCommand::new_command(None).to_message();
+    ping_message.send(&mut writer).await?;
+    reader.read(&mut buf).await?;
+
+    let response = message::Message::deserialize(&mut Cursor::new(&buf))?;
+    if response == pong_message {
+        println!("Receiving PING response");
+    } else {
+        anyhow::bail!("Response is different than PONG: {}", response);
+    }
+
+    buf.fill(0);
+
+    let listening_message =
+        commands::replconf::ReplConfCommand::new_listening_port_command(port).to_message();
+    listening_message.send(&mut writer).await?;
+    reader.read(&mut buf).await?;
+
+    let response = message::Message::deserialize(&mut Cursor::new(&buf))?;
+    if response == ok_message {
+        println!("Receiving REPLCONF listening-port response")
+    } else {
+        anyhow::bail!("Response is different than OK: {}", response);
+    }
+
+    buf.fill(0);
+
+    let capabilities_message =
+        commands::replconf::ReplConfCommand::new_capabilities_command().to_message();
+    capabilities_message.send(&mut writer).await?;
+    reader.read(&mut buf).await?;
+
+    let response = message::Message::deserialize(&mut Cursor::new(&buf))?;
+    if response == ok_message {
+        println!("Receiving REPLCONF capa response");
+    } else {
+        anyhow::bail!("Response is different than OK: {}", response);
+    }
+
+    Ok(())
 }

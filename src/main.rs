@@ -38,6 +38,7 @@ async fn main() -> anyhow::Result<()> {
         String::from("0.0.0"),
         server_config::ServerMode::Standalone,
         server_role,
+        String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
     );
     let db = db::new_db();
 

@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use crate::{
     db::Db,
     message::{BulkString, Message},
-    server_config::ServerConfig,
+    server_config::{ServerConfig, ServerRole},
 };
 
 use super::Command;
@@ -108,6 +108,15 @@ fn get_replication_info(
 ) -> anyhow::Result<()> {
     writeln!(writer, "# Replication")?;
     writeln!(writer, "role:{}", server_config.role)?;
+
+    if server_config.role == ServerRole::Master {
+        writeln!(writer, "master_replid:{}", server_config.replication_id)?;
+        writeln!(
+            writer,
+            "master_repl_offset:{}",
+            server_config.replication_offset
+        )?;
+    }
 
     Ok(())
 }

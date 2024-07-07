@@ -1,6 +1,6 @@
 use std::{env, fmt};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ServerRole {
     Master,
     Slave,
@@ -34,10 +34,17 @@ pub(crate) struct ServerConfig {
     pub(crate) os: String,
     pub(crate) arch_bits: String,
     pub(crate) role: ServerRole,
+    pub(crate) replication_id: String,
+    pub(crate) replication_offset: usize,
 }
 
 impl ServerConfig {
-    pub(crate) fn new(version: String, mode: ServerMode, role: ServerRole) -> Self {
+    pub(crate) fn new(
+        version: String,
+        mode: ServerMode,
+        role: ServerRole,
+        replication_id: String,
+    ) -> Self {
         let arch_bits = if env::consts::ARCH.contains("64") {
             String::from("64")
         } else {
@@ -50,6 +57,8 @@ impl ServerConfig {
             os: env::consts::OS.to_string(),
             arch_bits,
             role,
+            replication_id,
+            replication_offset: 0,
         }
     }
 }

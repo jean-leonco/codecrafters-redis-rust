@@ -77,7 +77,7 @@ pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow:
     }
 
     Message::deserialize(&mut Cursor::new(&buf))?;
-    println!("Receiving PSYNC capa response");
+    println!("Receiving PSYNC response");
 
     Ok(())
 }

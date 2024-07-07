@@ -2,7 +2,11 @@ use std::fmt;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use base64::{engine, Engine};
+use tokio::{
+    io::{AsyncWriteExt, BufWriter},
+    net::TcpStream,
+};
 
 use crate::{db::Db, message::Message, server_config::ServerConfig};
 
@@ -71,14 +75,24 @@ impl Command for PSyncCommand {
                 replication_offset,
                 ..
             } => {
+                let mut writer = BufWriter::new(stream);
+
                 let message = Message::simple_string(format!(
                     "FULLRESYNC {} {}",
                     replication_id, replication_offset
                 ));
                 message
-                    .send(stream)
+                    .send(&mut writer)
                     .await
-                    .context("Failed to send PSYNC reply")?;
+                    .context("Failed to send PSYNC FULLRESYNC reply")?;
+
+                // https://github.com/codecrafters-io/redis-tester/blob/main/internal/assets/empty_rdb_hex.md
+                let empty_rdb = engine::general_purpose::STANDARD.decode("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==")?;
+
+                writer.write_all(b"$").await?;
+                writer.write_all(&empty_rdb.len().to_ne_bytes()).await?;
+                writer.write_all(&empty_rdb).await?;
+                writer.flush().await?;
 
                 Ok(())
             }

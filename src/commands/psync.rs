@@ -90,7 +90,9 @@ impl Command for PSyncCommand {
                 let empty_rdb = engine::general_purpose::STANDARD.decode("UkVESVMwMDEx+glyZWRpcy12ZXIFNy4yLjD6CnJlZGlzLWJpdHPAQPoFY3RpbWXCbQi8ZfoIdXNlZC1tZW3CsMQQAPoIYW9mLWJhc2XAAP/wbjv+wP9aog==")?;
 
                 writer.write_all(b"$").await?;
-                writer.write_all(&empty_rdb.len().to_ne_bytes()).await?;
+                writer
+                    .write_all(empty_rdb.len().to_string().as_bytes())
+                    .await?;
                 writer.write_all(b"\r\n").await?;
                 writer.write_all(&empty_rdb).await?;
                 writer.flush().await?;

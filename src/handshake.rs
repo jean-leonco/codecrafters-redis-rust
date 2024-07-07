@@ -7,7 +7,7 @@ use tokio::{
 
 use crate::{
     commands::{ping, psync, replconf, Command},
-    message::Message,
+    message::{Message, SimpleString},
 };
 
 pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow::Result<()> {
@@ -24,12 +24,12 @@ pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow:
     ping_message.send(&mut writer).await?;
     let read = reader.read(&mut buf).await?;
     if read == 0 {
-        anyhow::bail!("Failed to read Master response");
+        anyhow::bail!("Failed to read response");
     }
 
     let response = Message::deserialize(&mut Cursor::new(&buf))?;
     if response == pong_message {
-        println!("Receiving PING response");
+        println!("PING replied {}", response);
     } else {
         anyhow::bail!("Response is different than PONG: {}", response);
     }
@@ -41,12 +41,12 @@ pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow:
     listening_message.send(&mut writer).await?;
     let read = reader.read(&mut buf).await?;
     if read == 0 {
-        anyhow::bail!("Failed to read Master response");
+        anyhow::bail!("Failed to read response");
     }
 
     let response = Message::deserialize(&mut Cursor::new(&buf))?;
     if response == ok_message {
-        println!("Receiving REPLCONF listening-port response")
+        println!("REPLCONF listening-port replied {}", response);
     } else {
         anyhow::bail!("Response is different than OK: {}", response);
     }
@@ -57,12 +57,12 @@ pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow:
     capabilities_message.send(&mut writer).await?;
     let read = reader.read(&mut buf).await?;
     if read == 0 {
-        anyhow::bail!("Failed to read Master response");
+        anyhow::bail!("Failed to read response");
     }
 
     let response = Message::deserialize(&mut Cursor::new(&buf))?;
     if response == ok_message {
-        println!("Receiving REPLCONF capa response");
+        println!("REPLCONF capa replied {}", response);
     } else {
         anyhow::bail!("Response is different than OK: {}", response);
     }
@@ -73,11 +73,15 @@ pub(crate) async fn send_handshake(master_address: String, port: u16) -> anyhow:
     psync_message.send(&mut writer).await?;
     let read = reader.read(&mut buf).await?;
     if read == 0 {
-        anyhow::bail!("Failed to read Master response");
+        anyhow::bail!("Failed to read response");
     }
 
-    Message::deserialize(&mut Cursor::new(&buf))?;
-    println!("Receiving PSYNC response");
+    let response: SimpleString = Message::deserialize(&mut Cursor::new(&buf))?.try_into()?;
+    println!("PSYNC replied {}", response);
+
+    if response.to_string().starts_with("FULLRESYNC") {
+        println!("Full resync with master");
+    }
 
     Ok(())
 }

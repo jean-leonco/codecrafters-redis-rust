@@ -33,10 +33,20 @@ pub(crate) enum Message {
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Message::Array { .. } => write!(f, "Array"),
-            Message::BulkString { .. } => write!(f, "BulkString"),
-            Message::NullBulkString { .. } => write!(f, "NullBulkString"),
-            Message::SimpleString { .. } => write!(f, "SimpleString"),
+            Message::Array(value) => {
+                let mut formatted = String::new();
+                formatted.push('*');
+
+                for element in value.elements.iter() {
+                    formatted.push_str(&element.to_string());
+                    formatted.push(' ');
+                }
+
+                write!(f, "{}", formatted)
+            }
+            Message::BulkString(value) => write!(f, "${}", value.data),
+            Message::NullBulkString => write!(f, "$-1"),
+            Message::SimpleString(value) => write!(f, "+{}", value.data),
         }
     }
 }
@@ -64,6 +74,23 @@ impl TryFrom<&Message> for BulkString {
 }
 
 impl fmt::Display for BulkString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data)
+    }
+}
+
+impl TryFrom<Message> for SimpleString {
+    type Error = anyhow::Error;
+
+    fn try_from(value: Message) -> anyhow::Result<Self> {
+        match value {
+            Message::SimpleString(value) => Ok(value.clone()),
+            value => anyhow::bail!("Failed to convert message to SimpleString: {}", value),
+        }
+    }
+}
+
+impl fmt::Display for SimpleString {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.data)
     }
@@ -165,7 +192,7 @@ impl Message {
         self,
         writer: &mut (impl AsyncWriteExt + std::marker::Unpin),
     ) -> anyhow::Result<()> {
-        println!("Writing message to writer {:?}", self);
+        println!("Writing message {}", self);
 
         match self {
             Message::Array(value) => {

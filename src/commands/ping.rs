@@ -5,6 +5,7 @@ use tokio::net::TcpStream;
 use crate::{
     db::Db,
     message::{BulkString, Message, SimpleString},
+    server_config::ServerConfig,
 };
 
 use super::Command;
@@ -25,7 +26,7 @@ impl Command for PingCommand {
         })
     }
 
-    async fn handle(&self, stream: &mut TcpStream, _: &Db) -> anyhow::Result<()> {
+    async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
         let message = Message::SimpleString(SimpleString {
             data: self.message.to_string(),
         });

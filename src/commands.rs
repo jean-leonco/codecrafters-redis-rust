@@ -7,6 +7,7 @@ use tokio::net::TcpStream;
 use crate::{
     db::Db,
     message::{Array, BulkString, Message},
+    server_config::ServerConfig,
 };
 
 pub(crate) mod echo;
@@ -21,7 +22,12 @@ pub(crate) trait Command: Send {
     where
         Self: Sized;
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()>;
+    async fn handle(
+        &self,
+        stream: &mut TcpStream,
+        db: &Db,
+        server_config: &ServerConfig,
+    ) -> anyhow::Result<()>;
 }
 
 pub(crate) fn parse_command(buf: &mut [u8]) -> anyhow::Result<Box<dyn Command>> {

@@ -2,14 +2,13 @@ use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
-use commands::parse_command;
-use db::{new_db, Db};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 
 pub(crate) mod commands;
 pub(crate) mod db;
 pub(crate) mod message;
+pub(crate) mod server_config;
 
 #[derive(Parser, Debug)]
 #[command()]
@@ -17,18 +16,30 @@ struct Args {
     #[arg(long, default_value_t = 6379)]
     // https://stackoverflow.com/a/113228
     port: u16,
+    #[arg(long)]
+    replicaof: Option<String>,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     println!("Logs from your program will appear here!");
 
-    let db = new_db();
-
     let args = Args::parse();
+
     let listener = TcpListener::bind(format!("127.0.0.1:{}", args.port))
         .await
         .context("Failed to bind port")?;
+
+    let server_role = match args.replicaof {
+        Some(_) => server_config::ServerRole::Slave,
+        _ => server_config::ServerRole::Master,
+    };
+    let server_config = server_config::ServerConfig::new(
+        String::from("0.0.0"),
+        server_config::ServerMode::Standalone,
+        server_role,
+    );
+    let db = db::new_db();
 
     tokio::spawn(remove_expired_keys(db.clone()));
 
@@ -37,15 +48,20 @@ async fn main() -> anyhow::Result<()> {
         println!("Accepted connection from {}", addr);
 
         let db = db.clone();
+        let server_config = server_config.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(stream, db).await {
+            if let Err(err) = handle_connection(stream, db, &server_config).await {
                 eprintln!("ERROR: {}", err);
             }
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> {
+async fn handle_connection(
+    mut stream: TcpStream,
+    db: db::Db,
+    server_config: &server_config::ServerConfig,
+) -> anyhow::Result<()> {
     let mut buf = [0; 1024];
     loop {
         let bytes_read = stream
@@ -56,14 +72,14 @@ async fn handle_connection(mut stream: TcpStream, db: Db) -> anyhow::Result<()> 
             break;
         }
 
-        let command = parse_command(&mut buf[..bytes_read])?;
-        command.handle(&mut stream, &db).await?;
+        let command = commands::parse_command(&mut buf[..bytes_read])?;
+        command.handle(&mut stream, &db, server_config).await?;
     }
 
     Ok(())
 }
 
-async fn remove_expired_keys(db: Db) {
+async fn remove_expired_keys(db: db::Db) {
     // TODO: improve how keys are expired.
     // https://redis.io/docs/latest/commands/expire/#how-redis-expires-keys
     // https://github.com/valkey-io/valkey/blob/unstable/src/expire.c

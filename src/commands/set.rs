@@ -5,6 +5,7 @@ use tokio::net::TcpStream;
 use crate::{
     db::{Db, Entry},
     message::{BulkString, Message, SimpleString},
+    server_config::ServerConfig,
 };
 
 use super::Command;
@@ -41,7 +42,12 @@ impl Command for SetCommand {
         })
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> Result<(), anyhow::Error> {
+    async fn handle(
+        &self,
+        stream: &mut TcpStream,
+        db: &Db,
+        _: &ServerConfig,
+    ) -> Result<(), anyhow::Error> {
         let mut db = db.lock().await;
         db.insert(
             self.key.to_string(),

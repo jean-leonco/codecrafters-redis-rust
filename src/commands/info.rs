@@ -4,13 +4,9 @@ use anyhow::{Context, Ok};
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{
-    db::Db,
-    message::{Array, BulkString, Message},
-    server_config::ServerConfig,
-};
+use crate::{db::Db, message::Message, server_config::ServerConfig};
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug, Eq, PartialEq, Hash)]
 pub(crate) enum InfoSection {
@@ -30,7 +26,7 @@ impl fmt::Display for InfoSection {
 }
 
 impl InfoSection {
-    pub(crate) fn parse(value: String) -> anyhow::Result<Self> {
+    fn parse(value: &String) -> anyhow::Result<Self> {
         match value.as_str() {
             "default" => Ok(Self::Default),
             "server" => Ok(Self::Server),
@@ -53,27 +49,23 @@ impl fmt::Display for InfoCommand {
 
 #[async_trait]
 impl Command for InfoCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
         let mut sections = HashSet::new();
         for args in args.iter() {
-            sections.insert(InfoSection::parse(args.data.to_string())?);
+            sections.insert(InfoSection::parse(&args.data)?);
         }
 
         Ok(Self { sections })
     }
 
     fn to_message(&self) -> Message {
-        let mut elements = vec![Message::BulkString(BulkString {
-            data: String::from("INFO"),
-        })];
+        let mut elements = vec![Message::bulk_string(String::from("INFO"))];
 
         for section in &self.sections {
-            elements.push(Message::BulkString(BulkString {
-                data: section.to_string(),
-            }));
+            elements.push(Message::bulk_string(section.to_string()));
         }
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(
@@ -102,13 +94,11 @@ impl Command for InfoCommand {
             }
         }
 
-        let message = Message::BulkString(BulkString {
-            data: String::from_utf8(buf)?,
-        });
+        let message = Message::bulk_string(String::from_utf8(buf)?);
         message
             .send(stream)
             .await
-            .context("Failed to send PING reply")?;
+            .context("Failed to send INFO reply")?;
 
         Ok(())
     }

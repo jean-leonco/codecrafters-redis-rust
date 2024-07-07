@@ -63,6 +63,12 @@ impl TryFrom<&Message> for BulkString {
     }
 }
 
+impl ToString for BulkString {
+    fn to_string(&self) -> String {
+        self.data.to_string()
+    }
+}
+
 const TERMINATOR_SIZE: usize = 2;
 
 impl Message {
@@ -118,14 +124,20 @@ impl Message {
         }
     }
 
-    pub(crate) fn simple_string_message(data: String) -> Message {
+    pub(crate) fn array(elements: Vec<Message>) -> Message {
+        Message::Array(Array { elements })
+    }
+
+    pub(crate) fn bulk_string(data: String) -> Message {
+        Message::BulkString(BulkString { data })
+    }
+
+    pub(crate) fn simple_string(data: String) -> Message {
         Message::SimpleString(SimpleString { data })
     }
 
     pub(crate) fn ok_message() -> Message {
-        Message::SimpleString(SimpleString {
-            data: String::from("OK"),
-        })
+        Message::simple_string(String::from("OK"))
     }
 
     async fn write_message(

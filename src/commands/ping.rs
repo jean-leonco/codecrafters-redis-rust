@@ -4,13 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{
-    db::Db,
-    message::{Array, BulkString, Message, SimpleString},
-    server_config::ServerConfig,
-};
+use crate::{db::Db, message::Message, server_config::ServerConfig};
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug)]
 pub(crate) struct PingCommand {
@@ -31,32 +27,26 @@ impl fmt::Display for PingCommand {
 
 #[async_trait]
 impl Command for PingCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
         Ok(Self {
-            message: args.first().map(|value| value.data.to_string()),
+            message: args.first().map(|value| value.to_string()),
         })
     }
 
     fn to_message(&self) -> Message {
-        let mut elements = vec![Message::BulkString(BulkString {
-            data: String::from("PING"),
-        })];
+        let mut elements = vec![Message::bulk_string(String::from("PING"))];
 
         if let Some(message) = &self.message {
-            elements.push(Message::BulkString(BulkString {
-                data: message.to_string(),
-            }))
+            elements.push(Message::bulk_string(message.to_string()))
         }
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
-        let message = Message::SimpleString(SimpleString {
-            data: match &self.message {
-                Some(value) => value.to_string(),
-                None => String::from("PONG"),
-            },
+        let message = Message::simple_string(match &self.message {
+            Some(value) => value.to_string(),
+            None => String::from("PONG"),
         });
         message
             .send(stream)

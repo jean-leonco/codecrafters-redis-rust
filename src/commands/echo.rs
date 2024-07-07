@@ -4,13 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{
-    db::Db,
-    message::{Array, BulkString, Message, SimpleString},
-    server_config::ServerConfig,
-};
+use crate::{db::Db, message::Message, server_config::ServerConfig};
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug)]
 pub(crate) struct EchoCommand {
@@ -25,33 +21,26 @@ impl fmt::Display for EchoCommand {
 
 #[async_trait]
 impl Command for EchoCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
         let message = args
             .first()
-            .expect("ECHO message should have reply message");
+            .expect("ECHO message should have reply message")
+            .to_string();
 
-        Ok(Self {
-            message: message.data.to_string(),
-        })
+        Ok(Self { message })
     }
 
     fn to_message(&self) -> Message {
         let elements = vec![
-            Message::BulkString(BulkString {
-                data: String::from("ECHO"),
-            }),
-            Message::BulkString(BulkString {
-                data: self.message.to_string(),
-            }),
+            Message::bulk_string(String::from("ECHO")),
+            Message::bulk_string(self.message.to_string()),
         ];
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
-        let message = Message::SimpleString(SimpleString {
-            data: self.message.to_string(),
-        });
+        let message = Message::simple_string(self.message.to_string());
         message
             .send(stream)
             .await

@@ -4,13 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{
-    db::Db,
-    message::{Array, BulkString, Message},
-    server_config::ServerConfig,
-};
+use crate::{db::Db, message::Message, server_config::ServerConfig};
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug)]
 pub(crate) struct GetCommand {
@@ -25,25 +21,22 @@ impl fmt::Display for GetCommand {
 
 #[async_trait]
 impl Command for GetCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
-        let key = args.first().expect("GET message should have key");
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
+        let key = args
+            .first()
+            .expect("GET message should have key")
+            .to_string();
 
-        Ok(Self {
-            key: key.data.to_string(),
-        })
+        Ok(Self { key })
     }
 
     fn to_message(&self) -> Message {
         let elements = vec![
-            Message::BulkString(BulkString {
-                data: String::from("GET"),
-            }),
-            Message::BulkString(BulkString {
-                data: self.key.to_string(),
-            }),
+            Message::bulk_string(String::from("GET")),
+            Message::bulk_string(self.key.to_string()),
         ];
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(
@@ -59,9 +52,7 @@ impl Command for GetCommand {
                 db.remove(&self.key);
                 Message::NullBulkString
             }
-            Some(value) => Message::BulkString(BulkString {
-                data: value.value.to_string(),
-            }),
+            Some(value) => Message::bulk_string(value.value.to_string()),
             None => Message::NullBulkString,
         };
         message

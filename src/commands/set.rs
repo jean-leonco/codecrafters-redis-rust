@@ -6,11 +6,11 @@ use tokio::net::TcpStream;
 
 use crate::{
     db::{Db, Entry},
-    message::{Array, BulkString, Message},
+    message::Message,
     server_config::ServerConfig,
 };
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug)]
 pub(crate) struct SetCommand {
@@ -27,7 +27,7 @@ impl fmt::Display for SetCommand {
 
 #[async_trait]
 impl Command for SetCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
         let key = args.first().expect("SET message should have key");
         let value = args.get(1).expect("SET message should have value");
         let mut expiration = None;
@@ -44,35 +44,25 @@ impl Command for SetCommand {
         }
 
         Ok(Self {
-            key: key.data.to_string(),
-            value: value.data.to_string(),
+            key: key.to_string(),
+            value: value.to_string(),
             expiration,
         })
     }
 
     fn to_message(&self) -> Message {
         let mut elements = vec![
-            Message::BulkString(BulkString {
-                data: String::from("SET"),
-            }),
-            Message::BulkString(BulkString {
-                data: self.key.to_string(),
-            }),
-            Message::BulkString(BulkString {
-                data: self.value.to_string(),
-            }),
+            Message::bulk_string(String::from("SET")),
+            Message::bulk_string(self.key.to_string()),
+            Message::bulk_string(self.value.to_string()),
         ];
 
         if let Some(expiration) = &self.expiration {
-            elements.push(Message::BulkString(BulkString {
-                data: String::from("PX"),
-            }));
-            elements.push(Message::BulkString(BulkString {
-                data: expiration.to_string(),
-            }));
+            elements.push(Message::bulk_string(String::from("PX")));
+            elements.push(Message::bulk_string(expiration.to_string()));
         }
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(

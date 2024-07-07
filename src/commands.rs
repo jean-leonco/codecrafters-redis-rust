@@ -17,9 +17,11 @@ pub(crate) mod ping;
 pub(crate) mod replconf;
 pub(crate) mod set;
 
+pub(crate) type CommandArgs<'a> = &'a [BulkString];
+
 #[async_trait]
 pub(crate) trait Command: Send + fmt::Display {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self>
+    fn new(args: CommandArgs) -> anyhow::Result<Self>
     where
         Self: Sized;
 

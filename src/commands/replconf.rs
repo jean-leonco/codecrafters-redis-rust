@@ -4,13 +4,9 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{
-    db::Db,
-    message::{Array, BulkString, Message},
-    server_config::ServerConfig,
-};
+use crate::{db::Db, message::Message, server_config::ServerConfig};
 
-use super::Command;
+use super::{Command, CommandArgs};
 
 #[derive(Debug)]
 enum Config {
@@ -45,7 +41,7 @@ impl fmt::Display for ReplConfCommand {
 
 #[async_trait]
 impl Command for ReplConfCommand {
-    fn new(args: &[BulkString]) -> anyhow::Result<Self> {
+    fn new(args: CommandArgs) -> anyhow::Result<Self> {
         let config = args
             .first()
             .expect("REPLCONF message should have configuration");
@@ -65,7 +61,6 @@ impl Command for ReplConfCommand {
                 let capabilities = args
                     .get(1)
                     .expect("capa should have capabilities")
-                    .data
                     .to_string();
 
                 Config::Capabilities(capabilities)
@@ -77,30 +72,20 @@ impl Command for ReplConfCommand {
     }
 
     fn to_message(&self) -> Message {
-        let mut elements = vec![Message::BulkString(BulkString {
-            data: String::from("REPLCONF"),
-        })];
+        let mut elements = vec![Message::bulk_string(String::from("REPLCONF"))];
 
         match &self.config {
             Config::ListeningPort(port) => {
-                elements.push(Message::BulkString(BulkString {
-                    data: String::from("listening-port"),
-                }));
-                elements.push(Message::BulkString(BulkString {
-                    data: port.to_string(),
-                }));
+                elements.push(Message::bulk_string(String::from("listening-port")));
+                elements.push(Message::bulk_string(port.to_string()));
             }
             Config::Capabilities(capabilities) => {
-                elements.push(Message::BulkString(BulkString {
-                    data: String::from("capa"),
-                }));
-                elements.push(Message::BulkString(BulkString {
-                    data: capabilities.to_string(),
-                }));
+                elements.push(Message::bulk_string(String::from("capa")));
+                elements.push(Message::bulk_string(capabilities.to_string()));
             }
         }
 
-        Message::Array(Array { elements })
+        Message::array(elements)
     }
 
     async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {

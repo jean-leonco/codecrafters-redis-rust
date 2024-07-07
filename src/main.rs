@@ -109,7 +109,7 @@ async fn send_handshake(master_address: String, port: u16) -> anyhow::Result<()>
     let mut reader = BufReader::new(rd);
 
     let mut buf = [0; 1024];
-    let pong_message = message::Message::simple_string_message(String::from("PONG"));
+    let pong_message = message::Message::simple_string(String::from("PONG"));
     let ok_message = message::Message::ok_message();
 
     let ping_message = commands::ping::PingCommand::new_command(None).to_message();

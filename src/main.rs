@@ -31,28 +31,20 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to bind port")?;
 
-    let server_config = server_config::ServerConfig::new(
-        String::from("0.0.0"),
-        server_config::ServerMode::Standalone,
-        String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
-        args.replicaof,
-    );
+    let server_config = server_config::ServerConfig::new(String::from("0.0.0"), args.replicaof);
     let db = db::new_db();
 
-    if server_config.role == server_config::ServerRole::Master {
-        tokio::spawn(remove_expired_keys(db.clone()));
-    } else {
-        let mut master_stream = TcpStream::connect(
-            server_config
-                .master_address
-                .as_ref()
-                .expect("Master address should be set"),
-        )
-        .await?;
+    match &server_config {
+        server_config::ServerConfig::Master { .. } => {
+            tokio::spawn(remove_expired_keys(db.clone()));
+        }
+        server_config::ServerConfig::Slave { master_address, .. } => {
+            let mut master_stream = TcpStream::connect(master_address).await?;
 
-        let ping_message = commands::ping::PingCommand::new(&[])?.to_message();
-        ping_message.send(&mut master_stream).await?;
-    }
+            let ping_message = commands::ping::PingCommand::new(&[])?.to_message();
+            ping_message.send(&mut master_stream).await?;
+        }
+    };
 
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;

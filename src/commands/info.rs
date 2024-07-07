@@ -7,7 +7,7 @@ use tokio::net::TcpStream;
 use crate::{
     db::Db,
     message::{Array, BulkString, Message},
-    server_config::{ServerConfig, ServerRole},
+    server_config::ServerConfig,
 };
 
 use super::Command;
@@ -123,11 +123,28 @@ fn get_default_info(writer: &mut impl Write, server_config: &ServerConfig) -> an
 }
 
 fn get_server_info(writer: &mut impl Write, server_config: &ServerConfig) -> anyhow::Result<()> {
+    let (version, mode, os, arch_bits) = match server_config {
+        ServerConfig::Master {
+            version,
+            mode,
+            os,
+            arch_bits,
+            ..
+        } => (version, mode, os, arch_bits),
+        ServerConfig::Slave {
+            version,
+            mode,
+            os,
+            arch_bits,
+            ..
+        } => (version, mode, os, arch_bits),
+    };
+
     writeln!(writer, "# Server")?;
-    writeln!(writer, "redis_version:{}", server_config.version)?;
-    writeln!(writer, "redis_mode:{}", server_config.mode)?;
-    writeln!(writer, "os:{}", server_config.os)?;
-    writeln!(writer, "arch_bits:{}", server_config.arch_bits)?;
+    writeln!(writer, "redis_version:{}", version)?;
+    writeln!(writer, "redis_mode:{}", mode)?;
+    writeln!(writer, "os:{}", os)?;
+    writeln!(writer, "arch_bits:{}", arch_bits)?;
 
     Ok(())
 }
@@ -137,15 +154,20 @@ fn get_replication_info(
     server_config: &ServerConfig,
 ) -> anyhow::Result<()> {
     writeln!(writer, "# Replication")?;
-    writeln!(writer, "role:{}", server_config.role)?;
 
-    if server_config.role == ServerRole::Master {
-        writeln!(writer, "master_replid:{}", server_config.replication_id)?;
-        writeln!(
-            writer,
-            "master_repl_offset:{}",
-            server_config.replication_offset
-        )?;
+    match server_config {
+        ServerConfig::Master {
+            replication_id,
+            replication_offset,
+            ..
+        } => {
+            writeln!(writer, "role:master")?;
+            writeln!(writer, "master_replid:{}", replication_id)?;
+            writeln!(writer, "master_repl_offset:{}", replication_offset)?;
+        }
+        ServerConfig::Slave { .. } => {
+            writeln!(writer, "role:slave")?;
+        }
     }
 
     Ok(())

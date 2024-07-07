@@ -1,4 +1,4 @@
-use std::{collections::HashSet, io::Write};
+use std::{collections::HashSet, fmt, io::Write};
 
 use anyhow::{Context, Ok};
 use async_trait::async_trait;
@@ -6,7 +6,7 @@ use tokio::net::TcpStream;
 
 use crate::{
     db::Db,
-    message::{BulkString, Message},
+    message::{Array, BulkString, Message},
     server_config::{ServerConfig, ServerRole},
 };
 
@@ -17,6 +17,16 @@ pub(crate) enum InfoSection {
     Server,
     Replication,
     Default,
+}
+
+impl fmt::Display for InfoSection {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            InfoSection::Server => write!(f, "server"),
+            InfoSection::Replication => write!(f, "replication"),
+            InfoSection::Default => write!(f, "default"),
+        }
+    }
 }
 
 impl InfoSection {
@@ -35,6 +45,12 @@ pub(crate) struct InfoCommand {
     sections: HashSet<InfoSection>,
 }
 
+impl fmt::Display for InfoCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "INFO")
+    }
+}
+
 #[async_trait]
 impl Command for InfoCommand {
     fn new(args: &[BulkString]) -> anyhow::Result<Self> {
@@ -44,6 +60,20 @@ impl Command for InfoCommand {
         }
 
         Ok(Self { sections })
+    }
+
+    fn to_message(&self) -> Message {
+        let mut elements = vec![Message::BulkString(BulkString {
+            data: String::from("INFO"),
+        })];
+
+        for section in &self.sections {
+            elements.push(Message::BulkString(BulkString {
+                data: section.to_string(),
+            }));
+        }
+
+        Message::Array(Array { elements })
     }
 
     async fn handle(

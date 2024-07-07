@@ -36,19 +36,40 @@ pub(crate) struct ServerConfig {
     pub(crate) role: ServerRole,
     pub(crate) replication_id: String,
     pub(crate) replication_offset: usize,
+    pub(crate) master_address: Option<String>,
 }
 
 impl ServerConfig {
     pub(crate) fn new(
         version: String,
         mode: ServerMode,
-        role: ServerRole,
         replication_id: String,
+        replica_of: Option<String>,
     ) -> Self {
         let arch_bits = if env::consts::ARCH.contains("64") {
             String::from("64")
         } else {
             String::from("32")
+        };
+
+        let role;
+        let master_address;
+        if let Some(replica_of) = replica_of {
+            role = ServerRole::Slave;
+            let mut address_parts = replica_of.splitn(2, ' ');
+            let host = address_parts
+                .next()
+                .expect("replica_of should have master host");
+            let port: u16 = address_parts
+                .next()
+                .expect("replica_of should have master port")
+                .parse()
+                .expect("replica_of port should be a integer");
+
+            master_address = Some(format!("{}:{}", host, port));
+        } else {
+            role = ServerRole::Master;
+            master_address = None;
         };
 
         Self {
@@ -59,6 +80,7 @@ impl ServerConfig {
             role,
             replication_id,
             replication_offset: 0,
+            master_address,
         }
     }
 }

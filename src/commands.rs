@@ -1,4 +1,4 @@
-use std::io::Cursor;
+use std::{fmt, io::Cursor};
 
 use anyhow::{Context, Ok};
 use async_trait::async_trait;
@@ -17,10 +17,12 @@ pub(crate) mod ping;
 pub(crate) mod set;
 
 #[async_trait]
-pub(crate) trait Command: Send {
+pub(crate) trait Command: Send + fmt::Display {
     fn new(args: &[BulkString]) -> anyhow::Result<Self>
     where
         Self: Sized;
+
+    fn to_message(&self) -> Message;
 
     async fn handle(
         &self,

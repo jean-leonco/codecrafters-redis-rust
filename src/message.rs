@@ -146,7 +146,7 @@ impl Message {
         match self {
             Message::Array(value) => {
                 writer
-                    .write_all(format!("*{}", value.elements.len()).as_bytes())
+                    .write_all(format!("*{}\r\n", value.elements.len()).as_bytes())
                     .await
                     .context("Failed to write Array")?;
 

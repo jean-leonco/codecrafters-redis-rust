@@ -1,10 +1,12 @@
+use std::fmt;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
 use crate::{
     db::Db,
-    message::{BulkString, Message},
+    message::{Array, BulkString, Message},
     server_config::ServerConfig,
 };
 
@@ -15,6 +17,12 @@ pub(crate) struct GetCommand {
     key: String,
 }
 
+impl fmt::Display for GetCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "GET")
+    }
+}
+
 #[async_trait]
 impl Command for GetCommand {
     fn new(args: &[BulkString]) -> anyhow::Result<Self> {
@@ -23,6 +31,19 @@ impl Command for GetCommand {
         Ok(Self {
             key: key.data.to_string(),
         })
+    }
+
+    fn to_message(&self) -> Message {
+        let elements = vec![
+            Message::BulkString(BulkString {
+                data: String::from("GET"),
+            }),
+            Message::BulkString(BulkString {
+                data: self.key.to_string(),
+            }),
+        ];
+
+        Message::Array(Array { elements })
     }
 
     async fn handle(

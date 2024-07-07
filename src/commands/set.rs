@@ -1,10 +1,12 @@
+use std::fmt;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
 use crate::{
     db::{Db, Entry},
-    message::{BulkString, Message, SimpleString},
+    message::{Array, BulkString, Message, SimpleString},
     server_config::ServerConfig,
 };
 
@@ -15,6 +17,12 @@ pub(crate) struct SetCommand {
     key: String,
     value: String,
     expiration: Option<u128>,
+}
+
+impl fmt::Display for SetCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET")
+    }
 }
 
 #[async_trait]
@@ -40,6 +48,31 @@ impl Command for SetCommand {
             value: value.data.to_string(),
             expiration,
         })
+    }
+
+    fn to_message(&self) -> Message {
+        let mut elements = vec![
+            Message::BulkString(BulkString {
+                data: String::from("SET"),
+            }),
+            Message::BulkString(BulkString {
+                data: self.key.to_string(),
+            }),
+            Message::BulkString(BulkString {
+                data: self.value.to_string(),
+            }),
+        ];
+
+        if let Some(expiration) = &self.expiration {
+            elements.push(Message::BulkString(BulkString {
+                data: String::from("PX"),
+            }));
+            elements.push(Message::BulkString(BulkString {
+                data: expiration.to_string(),
+            }));
+        }
+
+        Message::Array(Array { elements })
     }
 
     async fn handle(

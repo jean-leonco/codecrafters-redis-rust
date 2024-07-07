@@ -2,6 +2,7 @@ use std::{result::Result::Ok, time::Duration};
 
 use anyhow::Context;
 use clap::Parser;
+use commands::Command;
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -30,19 +31,28 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to bind port")?;
 
-    let server_role = match args.replicaof {
-        Some(_) => server_config::ServerRole::Slave,
-        _ => server_config::ServerRole::Master,
-    };
     let server_config = server_config::ServerConfig::new(
         String::from("0.0.0"),
         server_config::ServerMode::Standalone,
-        server_role,
         String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
+        args.replicaof,
     );
     let db = db::new_db();
 
-    tokio::spawn(remove_expired_keys(db.clone()));
+    if server_config.role == server_config::ServerRole::Master {
+        tokio::spawn(remove_expired_keys(db.clone()));
+    } else {
+        let mut master_stream = TcpStream::connect(
+            server_config
+                .master_address
+                .as_ref()
+                .expect("Master address should be set"),
+        )
+        .await?;
+
+        let ping_message = commands::ping::PingCommand::new(&[])?.to_message();
+        ping_message.send(&mut master_stream).await?;
+    }
 
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;
@@ -74,6 +84,7 @@ async fn handle_connection(
         }
 
         let command = commands::parse_command(&mut buf[..bytes_read])?;
+        println!("Command received: {}", command);
         command.handle(&mut stream, &db, server_config).await?;
     }
 

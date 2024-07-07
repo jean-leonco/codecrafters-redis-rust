@@ -91,6 +91,7 @@ impl Command for PSyncCommand {
 
                 writer.write_all(b"$").await?;
                 writer.write_all(&empty_rdb.len().to_ne_bytes()).await?;
+                writer.write_all(b"\r\n").await?;
                 writer.write_all(&empty_rdb).await?;
                 writer.flush().await?;
 

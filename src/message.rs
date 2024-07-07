@@ -63,9 +63,9 @@ impl TryFrom<&Message> for BulkString {
     }
 }
 
-impl ToString for BulkString {
-    fn to_string(&self) -> String {
-        self.data.to_string()
+impl fmt::Display for BulkString {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.data)
     }
 }
 

@@ -26,8 +26,8 @@ impl fmt::Display for InfoSection {
 }
 
 impl InfoSection {
-    fn parse(value: &String) -> anyhow::Result<Self> {
-        match value.as_str() {
+    fn parse(value: &str) -> anyhow::Result<Self> {
+        match value {
             "default" => Ok(Self::Default),
             "server" => Ok(Self::Server),
             "replication" => Ok(Self::Replication),

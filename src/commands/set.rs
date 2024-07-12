@@ -2,10 +2,13 @@ use std::fmt;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{
-    db::{Db, Entry, State},
+    db::{Db, Entry},
     message::Message,
 };
 
@@ -74,7 +77,11 @@ impl Command for SetCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> Result<(), anyhow::Error> {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> Result<(), anyhow::Error> {
         db.insert_key(
             self.key.to_string(),
             Entry::new(self.value.to_string(), self.expiration),
@@ -83,7 +90,7 @@ impl Command for SetCommand {
 
         let message = Message::ok_message();
         message
-            .send(stream)
+            .send(writer)
             .await
             .context("Failed to send SET reply")?;
 

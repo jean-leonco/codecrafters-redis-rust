@@ -2,7 +2,7 @@ use std::result::Result::Ok;
 
 use anyhow::Context;
 use clap::Parser;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, BufReader, BufWriter, ReadHalf, WriteHalf};
 use tokio::net::{TcpListener, TcpStream};
 
 pub(crate) mod commands;
@@ -32,33 +32,59 @@ async fn main() -> anyhow::Result<()> {
 
     let db = db::Db::new(args.replicaof);
 
-    if let db::State::Slave { master_address, .. } = &*db.state {
-        tokio::spawn(handshake::send_handshake(
-            master_address.to_string(),
-            args.port,
-        ));
-    };
-
     let expired_keys_db = db.clone();
     tokio::spawn(async move { expired_keys_db.remove_expired_keys().await });
 
+    if let db::State::Slave { master_address, .. } = &*db.state {
+        let stream = TcpStream::connect(master_address)
+            .await
+            .context("Failed to connect to master")?;
+        let (mut writer, mut reader) = split_stream(stream);
+
+        handshake::send_handshake(&mut writer, &mut reader, args.port).await?;
+
+        let db = db.clone();
+        tokio::spawn(async move {
+            if let Err(err) = handle_connection(&mut writer, &mut reader, db).await {
+                eprintln!("ERROR: {}", err);
+            };
+        });
+    }
+
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;
+        let (mut writer, mut reader) = split_stream(stream);
         println!("Accepted connection from {}", addr);
 
         let db = db.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(stream, db).await {
+            if let Err(err) = handle_connection(&mut writer, &mut reader, db).await {
                 eprintln!("ERROR: {}", err);
             }
         });
     }
 }
 
-async fn handle_connection(mut stream: TcpStream, db: db::Db) -> anyhow::Result<()> {
+fn split_stream(
+    stream: TcpStream,
+) -> (
+    BufWriter<WriteHalf<TcpStream>>,
+    BufReader<ReadHalf<TcpStream>>,
+) {
+    let (rd, wr) = tokio::io::split(stream);
+    let writer = BufWriter::new(wr);
+    let reader = BufReader::new(rd);
+    (writer, reader)
+}
+
+async fn handle_connection(
+    writer: &mut BufWriter<WriteHalf<TcpStream>>,
+    reader: &mut BufReader<ReadHalf<TcpStream>>,
+    db: db::Db,
+) -> anyhow::Result<()> {
     let mut buf = [0; 1024];
     loop {
-        let bytes_read = stream
+        let bytes_read = reader
             .read(&mut buf)
             .await
             .context("Failed to read stream")?;
@@ -68,7 +94,7 @@ async fn handle_connection(mut stream: TcpStream, db: db::Db) -> anyhow::Result<
 
         let command = commands::parse_command(&mut buf[..bytes_read])?;
         println!("Command received: {}", command);
-        command.handle(&mut stream, &db).await?;
+        command.handle(writer, &db).await?;
     }
 
     Ok(())

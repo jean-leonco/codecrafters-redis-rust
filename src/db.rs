@@ -1,13 +1,16 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     env, fmt,
     sync::Arc,
     time::{Duration, SystemTime},
 };
 
-use tokio::{io::BufWriter, net::TcpStream};
+use tokio::sync::broadcast;
 
-use crate::commands::{set, Command};
+use crate::{
+    commands::{set, Command},
+    message::Message,
+};
 
 #[derive(Hash, Debug, Clone)]
 pub(crate) struct Entry {
@@ -69,7 +72,7 @@ pub(crate) enum State {
         replication_id: String,
         replication_offset: usize,
         entries: tokio::sync::Mutex<HashMap<String, Entry>>,
-        replicas: std::sync::Mutex<HashSet<u16>>,
+        tx: tokio::sync::broadcast::Sender<Message>,
     },
     Slave {
         version: String,
@@ -119,6 +122,8 @@ impl Db {
                 }),
             }
         } else {
+            let (tx, mut _rx) = broadcast::channel(1024);
+
             Self {
                 state: Arc::new(State::Master {
                     version,
@@ -128,7 +133,7 @@ impl Db {
                     replication_id: String::from("8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb"),
                     replication_offset: 0,
                     entries: tokio::sync::Mutex::new(HashMap::new()),
-                    replicas: std::sync::Mutex::new(HashSet::new()),
+                    tx,
                 }),
             }
         }
@@ -175,33 +180,11 @@ impl Db {
         entries.remove(key);
     }
 
-    pub(crate) fn add_replica(&self, port: u16) {
-        match &*self.state {
-            State::Master { replicas, .. } => {
-                let mut replicas = replicas.lock().unwrap();
-                replicas.insert(port);
-            }
-            _ => unreachable!(),
-        }
-    }
-
     async fn propagate_command_to_replicas(&self, command: impl Command) {
         match &*self.state {
-            State::Master { replicas, .. } => {
-                let replicas = replicas.lock().unwrap();
-
-                // TODO: reuse TCP connections between calls
-                for port in replicas.iter() {
-                    let address = format!("127.0.0.1:{}", port);
-                    let message = command.to_message();
-
-                    tokio::spawn(async move {
-                        let stream = TcpStream::connect(&address).await.unwrap();
-                        let mut writer = BufWriter::new(stream);
-                        message.send(&mut writer).await.unwrap();
-
-                        println!("Message sent to replica {}", address);
-                    });
+            State::Master { tx, .. } => {
+                if tx.receiver_count() > 0 {
+                    tx.send(command.to_message()).unwrap();
                 }
             }
             _ => unreachable!(),

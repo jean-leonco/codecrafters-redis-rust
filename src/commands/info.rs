@@ -2,7 +2,10 @@ use std::{collections::HashSet, fmt, io::Write};
 
 use anyhow::{Context, Ok};
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{
     db::{Db, State},
@@ -71,7 +74,11 @@ impl Command for InfoCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> anyhow::Result<()> {
         let mut buf = Vec::new();
 
         if self.sections.is_empty() || self.sections.contains(&InfoSection::Default) {
@@ -94,7 +101,7 @@ impl Command for InfoCommand {
 
         let message = Message::bulk_string(String::from_utf8(buf)?);
         message
-            .send(stream)
+            .send(writer)
             .await
             .context("Failed to send INFO reply")?;
 

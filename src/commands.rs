@@ -2,7 +2,10 @@ use std::{fmt, io::Cursor};
 
 use anyhow::{Context, Ok};
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{
     db::Db,
@@ -27,7 +30,11 @@ pub(crate) trait Command: Send + fmt::Display {
 
     fn to_message(&self) -> Message;
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()>;
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> anyhow::Result<()>;
 }
 
 pub(crate) fn parse_command(buf: &mut [u8]) -> anyhow::Result<Box<dyn Command>> {

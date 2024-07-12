@@ -2,7 +2,10 @@ use std::fmt;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{db::Db, message::Message};
 
@@ -39,13 +42,17 @@ impl Command for GetCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> anyhow::Result<()> {
         let message = match db.get_key(&self.key).await {
             Some(value) => Message::bulk_string(value.value.to_string()),
             None => Message::NullBulkString,
         };
         message
-            .send(stream)
+            .send(writer)
             .await
             .context("Failed to send GET reply")?;
 

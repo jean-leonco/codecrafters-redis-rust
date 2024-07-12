@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use base64::{engine, Engine};
 use tokio::{
-    io::{AsyncWriteExt, BufWriter},
+    io::{AsyncWriteExt, BufWriter, WriteHalf},
     net::TcpStream,
 };
 
@@ -66,21 +66,24 @@ impl Command for PSyncCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> anyhow::Result<()> {
         match &*db.state {
             State::Master {
                 replication_id,
                 replication_offset,
+                tx,
                 ..
             } => {
-                let mut writer = BufWriter::new(stream);
-
                 let message = Message::simple_string(format!(
                     "FULLRESYNC {} {}",
                     replication_id, replication_offset
                 ));
                 message
-                    .send(&mut writer)
+                    .send(writer)
                     .await
                     .context("Failed to send PSYNC FULLRESYNC reply")?;
 
@@ -94,6 +97,14 @@ impl Command for PSyncCommand {
                 writer.write_all(b"\r\n").await?;
                 writer.write_all(&empty_rdb).await?;
                 writer.flush().await?;
+
+                let mut rx = tx.subscribe();
+                while let Ok(message) = rx.recv().await {
+                    message
+                        .send(writer)
+                        .await
+                        .context("Failed to broadcast message to replica")?
+                }
 
                 Ok(())
             }

@@ -2,7 +2,10 @@ use std::fmt;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{
     db::{Db, State},
@@ -91,15 +94,17 @@ impl Command for ReplConfCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
-        match *db.state {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        db: &Db,
+    ) -> anyhow::Result<()> {
+        match &*db.state {
             State::Master { .. } => match self.config {
-                Config::ListeningPort(port) => {
-                    db.add_replica(port);
-
+                Config::ListeningPort(_) => {
                     let message = Message::ok_message();
                     message
-                        .send(stream)
+                        .send(writer)
                         .await
                         .context("Failed to send REPLCONF reply")?;
 
@@ -108,7 +113,7 @@ impl Command for ReplConfCommand {
                 Config::Capabilities(_) => {
                     let message = Message::ok_message();
                     message
-                        .send(stream)
+                        .send(writer)
                         .await
                         .context("Failed to send REPLCONF reply")?;
 

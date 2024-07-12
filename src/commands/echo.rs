@@ -2,7 +2,10 @@ use std::fmt;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use tokio::net::TcpStream;
+use tokio::{
+    io::{BufWriter, WriteHalf},
+    net::TcpStream,
+};
 
 use crate::{db::Db, message::Message};
 
@@ -39,10 +42,14 @@ impl Command for EchoCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, _: &Db) -> anyhow::Result<()> {
+    async fn handle(
+        &self,
+        writer: &mut BufWriter<WriteHalf<TcpStream>>,
+        _: &Db,
+    ) -> anyhow::Result<()> {
         let message = Message::simple_string(self.message.to_string());
         message
-            .send(stream)
+            .send(writer)
             .await
             .context("Failed to send ECHO reply")?;
 

@@ -8,7 +8,10 @@ use tokio::{
     net::TcpStream,
 };
 
-use crate::{db::Db, message::Message, server_config::ServerConfig};
+use crate::{
+    db::{Db, State},
+    message::Message,
+};
 
 use super::{Command, CommandArgs};
 
@@ -63,14 +66,9 @@ impl Command for PSyncCommand {
         Message::array(elements)
     }
 
-    async fn handle(
-        &self,
-        stream: &mut TcpStream,
-        _: &Db,
-        server_config: &ServerConfig,
-    ) -> anyhow::Result<()> {
-        match server_config {
-            ServerConfig::Master {
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+        match &*db.state {
+            State::Master {
                 replication_id,
                 replication_offset,
                 ..
@@ -99,7 +97,7 @@ impl Command for PSyncCommand {
 
                 Ok(())
             }
-            ServerConfig::Slave { .. } => anyhow::bail!("Slave can not handle PSYNC command"),
+            State::Slave { .. } => anyhow::bail!("Slave can not handle PSYNC command"),
         }
     }
 }

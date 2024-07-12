@@ -4,7 +4,10 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{db::Db, message::Message, server_config::ServerConfig};
+use crate::{
+    db::{Db, State},
+    message::Message,
+};
 
 use super::{Command, CommandArgs};
 
@@ -88,13 +91,31 @@ impl Command for ReplConfCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
-        let message = Message::ok_message();
-        message
-            .send(stream)
-            .await
-            .context("Failed to send REPLCONF reply")?;
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+        match *db.state {
+            State::Master { .. } => match self.config {
+                Config::ListeningPort(port) => {
+                    db.add_replica(port);
 
-        Ok(())
+                    let message = Message::ok_message();
+                    message
+                        .send(stream)
+                        .await
+                        .context("Failed to send REPLCONF reply")?;
+
+                    Ok(())
+                }
+                Config::Capabilities(_) => {
+                    let message = Message::ok_message();
+                    message
+                        .send(stream)
+                        .await
+                        .context("Failed to send REPLCONF reply")?;
+
+                    Ok(())
+                }
+            },
+            State::Slave { .. } => anyhow::bail!("Slave can not handle REPLCONF command"),
+        }
     }
 }

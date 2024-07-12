@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{db::Db, message::Message, server_config::ServerConfig};
+use crate::{db::Db, message::Message};
 
 use super::{Command, CommandArgs};
 
@@ -43,7 +43,7 @@ impl Command for PingCommand {
         Message::array(elements)
     }
 
-    async fn handle(&self, stream: &mut TcpStream, _: &Db, _: &ServerConfig) -> anyhow::Result<()> {
+    async fn handle(&self, stream: &mut TcpStream, _: &Db) -> anyhow::Result<()> {
         let message = Message::simple_string(match &self.message {
             Some(value) => value.to_string(),
             None => String::from("PONG"),

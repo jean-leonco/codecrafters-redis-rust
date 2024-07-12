@@ -5,9 +5,8 @@ use async_trait::async_trait;
 use tokio::net::TcpStream;
 
 use crate::{
-    db::{Db, Entry},
+    db::{Db, Entry, State},
     message::Message,
-    server_config::ServerConfig,
 };
 
 use super::{Command, CommandArgs};
@@ -17,6 +16,16 @@ pub(crate) struct SetCommand {
     key: String,
     value: String,
     expiration: Option<u128>,
+}
+
+impl SetCommand {
+    pub(crate) fn new_command(key: String, value: String, expiration: Option<u128>) -> Self {
+        Self {
+            key,
+            value,
+            expiration,
+        }
+    }
 }
 
 impl fmt::Display for SetCommand {
@@ -65,23 +74,20 @@ impl Command for SetCommand {
         Message::array(elements)
     }
 
-    async fn handle(
-        &self,
-        stream: &mut TcpStream,
-        db: &Db,
-        _: &ServerConfig,
-    ) -> Result<(), anyhow::Error> {
-        let mut db = db.lock().await;
-        db.insert(
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> Result<(), anyhow::Error> {
+        db.insert_key(
             self.key.to_string(),
             Entry::new(self.value.to_string(), self.expiration),
-        );
+        )
+        .await;
 
-        let message = Message::ok_message();
-        message
-            .send(stream)
-            .await
-            .context("Failed to send SET reply")?;
+        if let State::Master { .. } = &*db.state {
+            let message = Message::ok_message();
+            message
+                .send(stream)
+                .await
+                .context("Failed to send SET reply")?;
+        }
 
         Ok(())
     }

@@ -9,7 +9,6 @@ pub(crate) mod commands;
 pub(crate) mod db;
 pub(crate) mod handshake;
 pub(crate) mod message;
-pub(crate) mod server_config;
 
 #[derive(Parser, Debug)]
 #[command()]
@@ -31,40 +30,32 @@ async fn main() -> anyhow::Result<()> {
         .await
         .context("Failed to bind port")?;
 
-    let server_config = server_config::ServerConfig::new(String::from("0.0.0"), args.replicaof);
-    let db = db::new_db();
+    let db = db::Db::new(args.replicaof);
 
-    match &server_config {
-        server_config::ServerConfig::Master { .. } => {
-            tokio::spawn(db::remove_expired_keys(db.clone()));
-        }
-        server_config::ServerConfig::Slave { master_address, .. } => {
-            tokio::spawn(handshake::send_handshake(
-                master_address.to_string(),
-                args.port,
-            ));
-        }
+    if let db::State::Slave { master_address, .. } = &*db.state {
+        tokio::spawn(handshake::send_handshake(
+            master_address.to_string(),
+            args.port,
+        ));
     };
+
+    let expired_keys_db = db.clone();
+    tokio::spawn(async move { expired_keys_db.remove_expired_keys().await });
 
     loop {
         let (stream, addr) = listener.accept().await.context("Failed to get client")?;
         println!("Accepted connection from {}", addr);
 
         let db = db.clone();
-        let server_config = server_config.clone();
         tokio::spawn(async move {
-            if let Err(err) = handle_connection(stream, db, &server_config).await {
+            if let Err(err) = handle_connection(stream, db).await {
                 eprintln!("ERROR: {}", err);
             }
         });
     }
 }
 
-async fn handle_connection(
-    mut stream: TcpStream,
-    db: db::Db,
-    server_config: &server_config::ServerConfig,
-) -> anyhow::Result<()> {
+async fn handle_connection(mut stream: TcpStream, db: db::Db) -> anyhow::Result<()> {
     let mut buf = [0; 1024];
     loop {
         let bytes_read = stream
@@ -77,7 +68,7 @@ async fn handle_connection(
 
         let command = commands::parse_command(&mut buf[..bytes_read])?;
         println!("Command received: {}", command);
-        command.handle(&mut stream, &db, server_config).await?;
+        command.handle(&mut stream, &db).await?;
     }
 
     Ok(())

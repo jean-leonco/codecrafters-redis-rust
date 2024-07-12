@@ -4,7 +4,10 @@ use anyhow::{Context, Ok};
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{db::Db, message::Message, server_config::ServerConfig};
+use crate::{
+    db::{Db, State},
+    message::Message,
+};
 
 use super::{Command, CommandArgs};
 
@@ -68,25 +71,20 @@ impl Command for InfoCommand {
         Message::array(elements)
     }
 
-    async fn handle(
-        &self,
-        stream: &mut TcpStream,
-        _: &Db,
-        server_config: &ServerConfig,
-    ) -> anyhow::Result<()> {
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
         let mut buf = Vec::new();
 
         if self.sections.is_empty() || self.sections.contains(&InfoSection::Default) {
-            get_default_info(&mut buf, server_config)?
+            get_default_info(&mut buf, &db.state)?
         } else {
             for section in &self.sections {
                 match section {
                     InfoSection::Server => {
-                        get_server_info(&mut buf, server_config)
+                        get_server_info(&mut buf, &db.state)
                             .context("Failed to get server info")?;
                     }
                     InfoSection::Replication => {
-                        get_replication_info(&mut buf, server_config)
+                        get_replication_info(&mut buf, &db.state)
                             .context("Failed to get replication info")?;
                     }
                     InfoSection::Default => unreachable!(),
@@ -104,24 +102,24 @@ impl Command for InfoCommand {
     }
 }
 
-fn get_default_info(writer: &mut impl Write, server_config: &ServerConfig) -> anyhow::Result<()> {
-    get_server_info(writer, server_config).context("Failed to get server info")?;
+fn get_default_info(writer: &mut impl Write, state: &State) -> anyhow::Result<()> {
+    get_server_info(writer, state).context("Failed to get server info")?;
     writeln!(writer)?;
-    get_replication_info(writer, server_config).context("Failed to get replication info")?;
+    get_replication_info(writer, state).context("Failed to get replication info")?;
 
     Ok(())
 }
 
-fn get_server_info(writer: &mut impl Write, server_config: &ServerConfig) -> anyhow::Result<()> {
-    let (version, mode, os, arch_bits) = match server_config {
-        ServerConfig::Master {
+fn get_server_info(writer: &mut impl Write, state: &State) -> anyhow::Result<()> {
+    let (version, mode, os, arch_bits) = match state {
+        State::Master {
             version,
             mode,
             os,
             arch_bits,
             ..
         } => (version, mode, os, arch_bits),
-        ServerConfig::Slave {
+        State::Slave {
             version,
             mode,
             os,
@@ -139,14 +137,11 @@ fn get_server_info(writer: &mut impl Write, server_config: &ServerConfig) -> any
     Ok(())
 }
 
-fn get_replication_info(
-    writer: &mut impl Write,
-    server_config: &ServerConfig,
-) -> anyhow::Result<()> {
+fn get_replication_info(writer: &mut impl Write, state: &State) -> anyhow::Result<()> {
     writeln!(writer, "# Replication")?;
 
-    match server_config {
-        ServerConfig::Master {
+    match state {
+        State::Master {
             replication_id,
             replication_offset,
             ..
@@ -155,7 +150,7 @@ fn get_replication_info(
             writeln!(writer, "master_replid:{}", replication_id)?;
             writeln!(writer, "master_repl_offset:{}", replication_offset)?;
         }
-        ServerConfig::Slave { .. } => {
+        State::Slave { .. } => {
             writeln!(writer, "role:slave")?;
         }
     }

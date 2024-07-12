@@ -4,7 +4,7 @@ use anyhow::Context;
 use async_trait::async_trait;
 use tokio::net::TcpStream;
 
-use crate::{db::Db, message::Message, server_config::ServerConfig};
+use crate::{db::Db, message::Message};
 
 use super::{Command, CommandArgs};
 
@@ -39,19 +39,8 @@ impl Command for GetCommand {
         Message::array(elements)
     }
 
-    async fn handle(
-        &self,
-        stream: &mut TcpStream,
-        db: &Db,
-        _: &ServerConfig,
-    ) -> Result<(), anyhow::Error> {
-        let mut db = db.lock().await;
-
-        let message = match db.get(&self.key) {
-            Some(value) if value.is_expired() => {
-                db.remove(&self.key);
-                Message::NullBulkString
-            }
+    async fn handle(&self, stream: &mut TcpStream, db: &Db) -> anyhow::Result<()> {
+        let message = match db.get_key(&self.key).await {
             Some(value) => Message::bulk_string(value.value.to_string()),
             None => Message::NullBulkString,
         };

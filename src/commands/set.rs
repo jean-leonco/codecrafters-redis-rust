@@ -81,13 +81,11 @@ impl Command for SetCommand {
         )
         .await;
 
-        if let State::Master { .. } = &*db.state {
-            let message = Message::ok_message();
-            message
-                .send(stream)
-                .await
-                .context("Failed to send SET reply")?;
-        }
+        let message = Message::ok_message();
+        message
+            .send(stream)
+            .await
+            .context("Failed to send SET reply")?;
 
         Ok(())
     }

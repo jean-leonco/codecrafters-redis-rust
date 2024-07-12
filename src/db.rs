@@ -147,11 +147,11 @@ impl Db {
     }
 
     pub(crate) async fn get_key(&self, key: &String) -> Option<Entry> {
-        let entries = self.get_entries().await;
+        let mut entries = self.get_entries().await;
 
         match entries.get(key) {
             Some(value) if value.is_expired() => {
-                self.remove_key(key).await;
+                entries.remove(key);
                 None
             }
             Some(value) => Some(value.clone()),
@@ -172,12 +172,6 @@ impl Db {
             ))
             .await;
         }
-    }
-
-    async fn remove_key(&self, key: &String) {
-        let mut entries = self.get_entries().await;
-
-        entries.remove(key);
     }
 
     async fn propagate_command_to_replicas(&self, command: impl Command) {

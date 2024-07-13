@@ -41,12 +41,14 @@ async fn main() -> anyhow::Result<()> {
             .context("Failed to connect to master")?;
         let (mut writer, mut reader) = split_stream(stream);
 
-        handshake::send_handshake(&mut writer, &mut reader, args.port).await?;
+        handshake::Handshake::new(&mut writer, &mut reader, args.port)
+            .send_handshake()
+            .await?;
 
         let db = db.clone();
         tokio::spawn(async move {
             if let Err(err) = handle_connection(&mut writer, &mut reader, db).await {
-                eprintln!("ERROR: {}", err);
+                eprintln!("MASTER CONNECTION ERROR: {}", err);
             };
         });
     }
@@ -59,7 +61,7 @@ async fn main() -> anyhow::Result<()> {
         let db = db.clone();
         tokio::spawn(async move {
             if let Err(err) = handle_connection(&mut writer, &mut reader, db).await {
-                eprintln!("ERROR: {}", err);
+                eprintln!("CONNECTION ERROR: {}", err);
             }
         });
     }

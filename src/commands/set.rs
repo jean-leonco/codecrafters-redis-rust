@@ -8,7 +8,7 @@ use tokio::{
 };
 
 use crate::{
-    db::{Db, Entry},
+    db::{Db, Entry, State},
     message::Message,
 };
 
@@ -33,7 +33,7 @@ impl SetCommand {
 
 impl fmt::Display for SetCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "SET")
+        write!(f, "SET {} {} {:?}", self.key, self.value, self.expiration)
     }
 }
 
@@ -88,11 +88,13 @@ impl Command for SetCommand {
         )
         .await;
 
-        let message = Message::ok_message();
-        message
-            .send(writer)
-            .await
-            .context("Failed to send SET reply")?;
+        if let State::Master { .. } = &*db.state {
+            let message = Message::ok_message();
+            message
+                .send(writer)
+                .await
+                .context("Failed to send SET reply")?;
+        }
 
         Ok(())
     }

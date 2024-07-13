@@ -101,16 +101,7 @@ impl Command for ReplConfCommand {
     ) -> anyhow::Result<()> {
         match &*db.state {
             State::Master { .. } => match self.config {
-                Config::ListeningPort(_) => {
-                    let message = Message::ok_message();
-                    message
-                        .send(writer)
-                        .await
-                        .context("Failed to send REPLCONF reply")?;
-
-                    Ok(())
-                }
-                Config::Capabilities(_) => {
+                Config::ListeningPort(_) | Config::Capabilities(_) => {
                     let message = Message::ok_message();
                     message
                         .send(writer)

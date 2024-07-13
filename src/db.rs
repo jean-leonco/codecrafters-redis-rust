@@ -13,21 +13,36 @@ use crate::{
 };
 
 #[derive(Hash, Debug, Clone)]
-pub(crate) struct Entry {
-    pub(crate) value: String,
-    ttl: Option<u128>,
+struct Ttl {
+    expiration: u128,
+    ttl: u128,
 }
 
-impl Entry {
-    pub(crate) fn new(value: String, expiration: Option<u128>) -> Self {
+impl Ttl {
+    fn new(expiration: u128) -> Self {
         let now = SystemTime::now()
             .duration_since(SystemTime::UNIX_EPOCH)
             .expect("SystemTime before UNIX EPOCH!")
             .as_millis();
 
         Self {
+            expiration,
+            ttl: now + expiration,
+        }
+    }
+}
+
+#[derive(Hash, Debug, Clone)]
+pub(crate) struct Entry {
+    pub(crate) value: String,
+    ttl: Option<Ttl>,
+}
+
+impl Entry {
+    pub(crate) fn new(value: String, expiration: Option<u128>) -> Self {
+        Self {
             value,
-            ttl: expiration.map(|expiration| now + expiration),
+            ttl: expiration.map(Ttl::new),
         }
     }
 
@@ -36,13 +51,13 @@ impl Entry {
     }
 
     pub(crate) fn is_expired(&self) -> bool {
-        if let Some(ttl) = self.ttl {
+        if let Some(ttl) = &self.ttl {
             let now = SystemTime::now()
                 .duration_since(SystemTime::UNIX_EPOCH)
                 .expect("SystemTime before UNIX EPOCH!")
                 .as_millis();
 
-            now > ttl
+            now > ttl.ttl
         } else {
             false
         }
@@ -141,8 +156,7 @@ impl Db {
 
     async fn get_entries(&self) -> tokio::sync::MutexGuard<HashMap<String, Entry>> {
         match &*self.state {
-            State::Master { entries, .. } => entries.lock().await,
-            State::Slave { entries, .. } => entries.lock().await,
+            State::Master { entries, .. } | State::Slave { entries, .. } => entries.lock().await,
         }
     }
 
@@ -165,23 +179,32 @@ impl Db {
         entries.insert(key.clone(), value.clone());
 
         if let State::Master { .. } = &*self.state {
-            self.propagate_command_to_replicas(set::SetCommand::new_command(
+            self.propagate_command_to_replicas(&set::SetCommand::new_command(
                 key,
                 value.value,
-                value.ttl,
-            ))
-            .await;
+                value.ttl.map(|value| value.expiration),
+            ));
         }
     }
 
-    async fn propagate_command_to_replicas(&self, command: impl Command) {
+    fn propagate_command_to_replicas(&self, command: &impl Command) {
         match &*self.state {
             State::Master { tx, .. } => {
-                if tx.receiver_count() > 0 {
-                    tx.send(command.to_message()).unwrap();
+                let receiver_count = tx.receiver_count();
+                if receiver_count > 0 {
+                    if let Err(err) = tx.send(command.to_message()) {
+                        eprintln!("COMMAND {} PROPAGATION ERROR PROPAGATING: {}", command, err);
+                    } else {
+                        println!(
+                            "Command {} propagated to {} receivers",
+                            command, receiver_count
+                        );
+                    }
+                } else {
+                    println!("No receiver found {}", receiver_count);
                 }
             }
-            _ => unreachable!(),
+            State::Slave { .. } => unreachable!(),
         }
     }
 
@@ -201,7 +224,7 @@ impl Db {
             for (key, value) in keys_to_delete {
                 if value.is_expired() {
                     entries.remove(key);
-                    println!("Entry {} deleted", key);
+                    println!("Entry {} removed", key);
                 }
             }
         }

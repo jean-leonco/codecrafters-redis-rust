@@ -37,7 +37,7 @@ impl fmt::Display for Message {
                 let mut formatted = String::new();
                 formatted.push('*');
 
-                for element in value.elements.iter() {
+                for element in &value.elements {
                     formatted.push_str(&element.to_string());
                     formatted.push(' ');
                 }

@@ -32,7 +32,7 @@ impl fmt::Display for PingCommand {
 impl Command for PingCommand {
     fn new(args: CommandArgs) -> anyhow::Result<Self> {
         Ok(Self {
-            message: args.first().map(|value| value.to_string()),
+            message: args.first().map(std::string::ToString::to_string),
         })
     }
 
@@ -40,7 +40,7 @@ impl Command for PingCommand {
         let mut elements = vec![Message::bulk_string(String::from("PING"))];
 
         if let Some(message) = &self.message {
-            elements.push(Message::bulk_string(message.to_string()))
+            elements.push(Message::bulk_string(message.to_string()));
         }
 
         Message::array(elements)

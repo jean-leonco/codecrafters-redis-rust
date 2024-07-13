@@ -57,7 +57,7 @@ impl fmt::Display for InfoCommand {
 impl Command for InfoCommand {
     fn new(args: CommandArgs) -> anyhow::Result<Self> {
         let mut sections = HashSet::new();
-        for args in args.iter() {
+        for args in args {
             sections.insert(InfoSection::parse(&args.data)?);
         }
 
@@ -82,7 +82,7 @@ impl Command for InfoCommand {
         let mut buf = Vec::new();
 
         if self.sections.is_empty() || self.sections.contains(&InfoSection::Default) {
-            get_default_info(&mut buf, &db.state)?
+            get_default_info(&mut buf, &db.state)?;
         } else {
             for section in &self.sections {
                 match section {
@@ -125,8 +125,8 @@ fn get_server_info(writer: &mut impl Write, state: &State) -> anyhow::Result<()>
             os,
             arch_bits,
             ..
-        } => (version, mode, os, arch_bits),
-        State::Slave {
+        }
+        | State::Slave {
             version,
             mode,
             os,

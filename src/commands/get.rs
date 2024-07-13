@@ -18,7 +18,7 @@ pub(crate) struct GetCommand {
 
 impl fmt::Display for GetCommand {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "GET")
+        write!(f, "GET {}", self.key)
     }
 }
 

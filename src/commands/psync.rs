@@ -103,7 +103,7 @@ impl Command for PSyncCommand {
                     message
                         .send(writer)
                         .await
-                        .context("Failed to broadcast message to replica")?
+                        .context("Failed to broadcast message to replica")?;
                 }
 
                 Ok(())
